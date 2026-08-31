@@ -195,8 +195,9 @@
     <div class="strip" id="conStrip"></div>
     <div class="panel">
       <h2>This week — what each result is worth</h2>
-      <div class="sub">$ swing per contest if the team wins vs loses · click a team to record the winner ·
-        type in the Win % column to override the model</div>
+      <div class="sub">Expected $ swing per contest if the team wins vs loses, with every other pending game
+        weighted by its win probability · click a team to record the winner · Win % is live in-game,
+        else your typed number, else the market line, else the model</div>
       <div style="overflow-x:auto"><table class="games" id="rootTable"><thead id="rootHead"></thead><tbody id="rootBody"></tbody></table></div>
     </div>
   </div>
@@ -250,9 +251,22 @@ function modelWinP(team, g) {
   const margin = (RATINGS[team] - RATINGS[opp]) + (home ? hfa : -hfa);
   return normCdf(margin / MARGIN_SD);
 }
+/* Effective win prob precedence: LIVE in-game probability (a typed pregame number is stale once the
+ * game kicks off) > typed override > pregame market line > ratings model. */
+let live = { games: {} };   // live.games[gameKey] = { state, detail, as, hs, id, wp (home, in-game), mkt (home, pregame) }
 function winP(team, g) {
-  const t = state.winp && state.winp[gameKey(g)];
+  const k = gameKey(g);
+  const lv = live.games[k];
+  if (lv && lv.state === "in" && lv.wp != null && !isNaN(lv.wp)) {
+    const p = Math.max(0.01, Math.min(0.99, Number(lv.wp)));
+    return team === g.home ? p : 1 - p;
+  }
+  const t = state.winp && state.winp[k];
   if (t != null && !isNaN(t)) { const pHome = Math.max(0.001, Math.min(0.999, t / 100)); return team === g.home ? pHome : 1 - pHome; }
+  if (lv && lv.state === "pre" && lv.mkt != null && !isNaN(lv.mkt)) {
+    const p = Math.max(0.01, Math.min(0.99, Number(lv.mkt)));
+    return team === g.home ? p : 1 - p;
+  }
   return modelWinP(team, g);
 }
 
@@ -331,7 +345,7 @@ function feeOf(c)  { const o = Number(state.money.fees[c]); return o > 0 ? o : C
 /* Everything read back from the shared store is validated before use: team tokens against NAMES,
  * numbers through Number(). The store is world-writable by design, so the page must stay safe even
  * against hand-crafted junk written directly into it. */
-function resultOf(g) { const r = state.results[gameKey(g)]; return r === g.home || r === g.away ? r : null; }
+function resultOf(g) { const r = state.results[gameKey(g)]; return r === g.home || r === g.away || r === "TIE" ? r : null; }
 
 /* ============================== PARSERS ============================== */
 const POOL_NICK = {
@@ -486,7 +500,7 @@ function unpackPool(c, payload) {
 function pickTeams(v) { return (v == null ? [] : Array.isArray(v) ? v : [v]).filter(t => NAMES[t]); }
 function winnerOf(g, hyp) {
   const w = (hyp && hyp[gameKey(g)]) || state.results[gameKey(g)] || null;
-  return w === g.home || w === g.away ? w : null;
+  return w === g.home || w === g.away || w === "TIE" ? w : null;   // "TIE": both sides lose (ties lose everywhere)
 }
 function gameOfTeam(leg, t) { return leg.games.find(g => g.home === t || g.away === t) || null; }
 function teamLostIn(leg, t, hyp) {
@@ -537,9 +551,9 @@ function fieldAliveEntering(c, i) {
     for (const g of leg.games) {
       const w = winnerOf(g, null);
       if (!w) { anyPending = true; continue; }
-      const l = w === g.home ? g.away : g.home;
-      const share = (fd.own[l] || 0) / fd.alive;
-      if (leg.picks > 1) surv *= 1 - share; else lost += share;
+      const sA = (fd.own[g.away] || 0) / fd.alive, sH = (fd.own[g.home] || 0) / fd.alive;
+      const share = w === "TIE" ? sA + sH : w === g.home ? sA : sH;
+      if (leg.picks > 1) surv *= Math.max(0, 1 - share); else lost += share;
     }
     if (anyPending) exact = false;
     n *= leg.picks > 1 ? surv : Math.max(0, 1 - lost);
@@ -586,7 +600,7 @@ function contestWeekEV(c, w, hyp) {
         const wnr = winnerOf(g, hyp);
         const shareA = (fd.own[g.away] || 0) / fd.alive, shareH = (fd.own[g.home] || 0) / fd.alive;
         let dead, edead;
-        if (wnr) { dead = wnr === g.home ? shareA : shareH; edead = dead; }
+        if (wnr) { dead = wnr === "TIE" ? shareA + shareH : wnr === g.home ? shareA : shareH; edead = dead; }
         else { dead = 0; edead = shareA * (1 - winP(g.away, g)) + shareH * (1 - winP(g.home, g)); }
         if (leg.picks > 1) { surv *= 1 - dead; esurv *= 1 - edead; }
         else { lost += dead; elost += edead; }
@@ -651,7 +665,10 @@ function rootingGuide(w) {
         const eh = contestWeekEV(c, w, { [k]: g.home });
         const ea = contestWeekEV(c, w, { [k]: g.away });
         if (!eh || !ea) continue;
-        const d = eh.evNow - ea.evNow;   // one entry per contest, every contest — the money columns read these
+        // EXPECTED EV difference: this game forced each way, every other pending game weighted by its
+        // win probability. Low-owned teams price correctly — conditional on them winning, the rest of
+        // the field is expected to thin around you.
+        const d = eh.evExp - ea.evExp;
         per.push({ c, d });
         dTot += d;
       }
@@ -674,6 +691,77 @@ const fmtMoney = v =>
        : v.toFixed(2));
 const fmtSwing = v => (v >= 0 ? "+" : "−") + fmtMoney(Math.abs(v));
 const fmtN = v => v >= 100 ? Math.round(v).toLocaleString("en-US") : (Math.round(v * 10) / 10).toString();
+
+/* ============================== LIVE SCORES (ESPN public scoreboard) ==============================
+ * Polled every 60s while the page is visible. Finals write straight into results (a tied final is
+ * recorded as "TIE" — both sides lose), in-progress games carry ESPN's live win probability into
+ * winP(), and pregame the posted market line replaces the ratings model. Fails silently where the
+ * host blocks external requests (the artifact viewer does; the public site doesn't). */
+const ESPN_TEAM = { WSH: "WAS", LA: "LAR" };
+function espnAbbr(a) { a = String(a || "").toUpperCase(); return NAMES[a] ? a : ESPN_TEAM[a] || null; }
+let livePollFails = 0, livePollLast = 0;
+async function livePoll(force) {
+  if (!force && document.hidden) return;
+  if (livePollFails >= 3 && Date.now() - livePollLast < 300000) return;   // back off to 5 min after repeated failures
+  livePollLast = Date.now();
+  try {
+    const data = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=2026&seasontype=2&week=" + week)
+      .then(r => r.json());
+    livePollFails = 0;
+    let changed = false;
+    const inGame = [];
+    for (const ev of (data && data.events) || []) {
+      const comp = ev.competitions && ev.competitions[0]; if (!comp) continue;
+      const home = (comp.competitors || []).find(x => x.homeAway === "home");
+      const away = (comp.competitors || []).find(x => x.homeAway === "away");
+      if (!home || !away) continue;
+      const h = espnAbbr(home.team && home.team.abbreviation), a = espnAbbr(away.team && away.team.abbreviation);
+      const g = h && a ? SCHEDULE.find(x => x.week === week && x.home === h && x.away === a) : null;
+      if (!g) continue;
+      const k = gameKey(g);
+      const st = (ev.status && ev.status.type) || {};
+      const prev = live.games[k] || {};
+      const lv = live.games[k] = {
+        state: st.state, detail: st.shortDetail || "",
+        as: Number(away.score), hs: Number(home.score), id: ev.id,
+        wp: prev.wp, mkt: prev.mkt
+      };
+      const odds = comp.odds && comp.odds[0];
+      if (odds && odds.details && lv.state === "pre") {
+        const m = String(odds.details).match(/([A-Z]{2,4})\s*([+-][\d.]+)/);   // e.g. "KC -3.0"
+        if (m) {
+          const fav = espnAbbr(m[1]), line = Math.abs(parseFloat(m[2]));
+          if ((fav === g.home || fav === g.away) && !isNaN(line))
+            lv.mkt = normCdf((fav === g.home ? line : -line) / MARGIN_SD);
+        }
+      }
+      if (lv.state === "in") inGame.push({ k, id: ev.id });
+      if (lv.state === "post" && !isNaN(lv.as) && !isNaN(lv.hs)) {
+        const winner = lv.as === lv.hs ? "TIE" : lv.hs > lv.as ? g.home : g.away;
+        if (state.results[k] !== winner) { state.results[k] = winner; changed = true; }
+      }
+    }
+    for (const s of inGame) {   // one small call per live game for ESPN's in-game win probability
+      try {
+        const sm = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=" + s.id).then(r => r.json());
+        const wpArr = sm && sm.winprobability;
+        if (wpArr && wpArr.length) {
+          const p = Number(wpArr[wpArr.length - 1].homeWinPercentage);
+          if (!isNaN(p)) live.games[s.k].wp = p;
+        }
+      } catch (e) {}
+    }
+    if (changed) queueSave();
+    const el = document.activeElement;
+    if (!(document.hasFocus() && el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) render();
+  } catch (e) { livePollFails++; }
+}
+/** Small score/clock tag for a team row. */
+function liveTag(g) {
+  const lv = live.games[gameKey(g)];
+  if (!lv || lv.state === "pre" || isNaN(lv.as) || isNaN(lv.hs)) return "";
+  return `<span class="oppn">${lv.as}–${lv.hs}${lv.detail ? " · " + esc(lv.detail) : ""}</span>`;
+}
 
 /* ============================== SHARED-STATE GLUE (public site: Firebase RTDB) ==============================
  * The shared copy lives in the group's Firebase Realtime Database. Everyone who opens the site sees it
@@ -1057,7 +1145,7 @@ function renderRooting(R) {
       ? `<span class="s2">${r.res === r.t ? "✓ won" : "✗ lost"}</span>`
       : money(r.swing);
     return `<tr class="${r.settled ? "settled" : ""} ${lost ? "dead" : ""}">
-      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}</span></td>
+      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}</span>${liveTag(r.g)}</td>
       <td class="num wp">${winCell}</td>
       ${perCells}
       <td class="num"><b>${totCell}</b></td>
@@ -1101,7 +1189,7 @@ function renderContestView(c, b) {
     const lost = r.res && r.res !== r.t;
     const status = r.res ? (r.res === r.t ? ` <span class="stW">✓</span>` : ` <span class="stL">✗</span>`) : "";
     return `<tr class="${r.settled ? "settled" : ""} ${lost ? "dead" : ""}">
-      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${status}</td>
+      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${liveTag(r.g)}${status}</td>
       <td class="num s">${Math.round(r.wp * 100)}%</td>
       <td class="num">${r.s.mine || ""}</td>
       <td class="num s">${r.s.mine ? r.s.minePct.toFixed(1) + "%" : ""}</td>
@@ -1392,6 +1480,9 @@ function wireHeader() {
   wireHeader();
   render();
   connectShared();
+  livePoll(true);
+  setInterval(() => livePoll(), 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) livePoll(); });
 })();
 </script>
 
