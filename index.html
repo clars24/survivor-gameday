@@ -194,12 +194,10 @@
     <div class="tiles" id="tiles"></div>
     <div class="strip" id="conStrip"></div>
     <div class="panel">
-      <h2>This week — all contests</h2>
-      <div class="sub">Click a team to record the winner · swing = total $ across the four pots if they win ·
+      <h2>This week — what each result is worth</h2>
+      <div class="sub">$ swing per contest if the team wins vs loses · click a team to record the winner ·
         type in the Win % column to override the model</div>
-      <div style="overflow-x:auto"><table class="games" id="rootTable"><thead>
-        <tr><th>Team</th><th class="num">Win %</th><th class="num">Ours</th><th class="num">Ours %</th><th class="num">Field</th><th class="num">Field %</th><th class="num">Lev</th><th class="num">Swing</th></tr>
-      </thead><tbody id="rootBody"></tbody></table></div>
+      <div style="overflow-x:auto"><table class="games" id="rootTable"><thead id="rootHead"></thead><tbody id="rootBody"></tbody></table></div>
     </div>
   </div>
 
@@ -653,11 +651,10 @@ function rootingGuide(w) {
         const eh = contestWeekEV(c, w, { [k]: g.home });
         const ea = contestWeekEV(c, w, { [k]: g.away });
         if (!eh || !ea) continue;
-        const d = eh.evNow - ea.evNow;
-        if (Math.abs(d) > 0.005) per.push({ c, d });
+        const d = eh.evNow - ea.evNow;   // one entry per contest, every contest — the money columns read these
+        per.push({ c, d });
         dTot += d;
       }
-      per.sort((x, y) => Math.abs(y.d) - Math.abs(x.d));
     }
     out.push({ g, k, settled, dTot, per, root: dTot >= 0 ? g.home : g.away });
   }
@@ -1010,41 +1007,41 @@ function wireGameTable(tbody) {
   });
 }
 
-/* ---- main page: one row per TEAM, aggregated across the four contests, sorted by win prob ---- */
+/* ---- main page: one row per TEAM, sorted by win prob — pure money view.
+ * A column per contest with the $ swing (EV if the team wins minus EV if it loses) plus the total,
+ * deliberately NO cross-contest entry counts: a Grandissimo entry is worth ~100x a Splash 100 entry,
+ * so mixed counts and percentages mislead. Counts live on each contest's own tab. ---- */
 function renderRooting(R) {
-  let min0All = 0;
-  for (const c of CONTEST_KEYS) if (R.base[c]) min0All += R.base[c].Min0;
+  $("rootHead").innerHTML = `<tr><th>Team</th><th class="num">Win %</th>
+    ${CONTEST_KEYS.map(c => `<th class="num">${esc(CONTESTS[c].short)}</th>`).join("")}
+    <th class="num">Total</th></tr>`;
   const teamRows = [];
   let anyData = false;
   for (const { g, k, settled, dTot, per } of R.games) {
     const res = resultOf(g);
     for (const t of [g.away, g.home]) {
-      let mine = 0, fCnt = 0, fAlive = 0, any = false;
+      let mine = 0, fCnt = 0;
       for (const c of CONTEST_KEYS) {
         const s = statTeam(R.base[c], c, g, t);
         if (!s) continue;
         mine += s.mine;
-        if (s.alive > 0) { any = true; fCnt += s.fieldCnt; fAlive += s.alive; }
+        if (s.alive > 0) { anyData = true; fCnt += s.fieldCnt; }
       }
-      if (any) anyData = true;
       const sign = t === g.home ? 1 : -1;
-      const brk = per.map(p => `${CONTESTS[p.c].short} ${fmtSwing(p.d * sign)}`).join(" · ");
-      teamRows.push({
-        t, g, k, settled, res, mine,
-        minePct: min0All ? 100 * mine / min0All : 0,
-        fieldCnt: any ? fCnt : null,
-        fieldPct: any && fAlive > 0 ? 100 * fCnt / fAlive : null,
-        swing: settled ? null : dTot * sign, brk,
-        wp: winP(t, g)
-      });
+      const perT = {};
+      for (const p of per) perT[p.c] = p.d * sign;
+      teamRows.push({ t, g, k, settled, res, mine, fCnt, perT,
+        swing: settled ? null : dTot * sign, wp: winP(t, g) });
     }
   }
   // once picks are in (any imported field or recorded picks), drop teams nobody is on
   const shown = teamRows
-    .filter(r => !anyData || r.mine > 0 || r.fieldCnt > 0)
+    .filter(r => !anyData || r.mine > 0 || r.fCnt > 0)
     .sort((a, b) => b.wp - a.wp);
+  const money = (v) => v == null || isNaN(v) ? `<span class="s2">—</span>`
+    : Math.abs(v) < 0.5 ? `<span class="s2">—</span>`
+    : `<span class="${v >= 0 ? "pos" : "neg"}">${fmtSwing(v)}</span>`;
   const rows = shown.map(r => {
-    const lev = levTxt(r.minePct, r.fieldPct);
     const lost = r.res && r.res !== r.t;
     const wpVal = Number(state.winp[r.k]);
     const wpTyped = state.winp[r.k] != null && !isNaN(wpVal);
@@ -1054,22 +1051,19 @@ function renderRooting(R) {
       : `<input class="cell wpin ${wpTyped ? "edited" : ""}" data-g="${r.k}" data-side="${r.t === r.g.home ? "home" : "away"}"
            value="${wpTyped ? (r.t === r.g.home ? wpVal : 100 - wpVal) : ""}" placeholder="${shownPct}"
            title="${r.t} win % — type to override the model">`;
-    const swingCell = r.settled
+    const perCells = CONTEST_KEYS.map(c =>
+      `<td class="num">${r.settled ? `<span class="s2">—</span>` : money(r.perT[c])}</td>`).join("");
+    const totCell = r.settled
       ? `<span class="s2">${r.res === r.t ? "✓ won" : "✗ lost"}</span>`
-      : r.swing == null || Math.abs(r.swing) < 0.5 ? `<span class="s2">—</span>`
-      : `<span class="${r.swing >= 0 ? "pos" : "neg"}" title="${esc(r.brk)}">${fmtSwing(r.swing)}</span>`;
+      : money(r.swing);
     return `<tr class="${r.settled ? "settled" : ""} ${lost ? "dead" : ""}">
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}</span></td>
       <td class="num wp">${winCell}</td>
-      <td class="num">${r.mine || ""}</td>
-      <td class="num s">${r.mine ? r.minePct.toFixed(1) + "%" : ""}</td>
-      <td class="num">${r.fieldCnt == null ? "—" : fmtN(r.fieldCnt)}</td>
-      <td class="num s">${r.fieldPct == null ? "—" : r.fieldPct.toFixed(1) + "%"}</td>
-      <td class="num ${lev.cls}">${lev.txt}</td>
-      <td class="num">${swingCell}</td>
+      ${perCells}
+      <td class="num"><b>${totCell}</b></td>
     </tr>`;
   }).join("");
-  $("rootBody").innerHTML = rows || `<tr><td colspan="8" class="empty">no games this week</td></tr>`;
+  $("rootBody").innerHTML = rows || `<tr><td colspan="${3 + CONTEST_KEYS.length}" class="empty">no games this week</td></tr>`;
   wireGameTable($("rootBody"));
 }
 
