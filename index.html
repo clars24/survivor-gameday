@@ -133,12 +133,8 @@
   .alive b { color: var(--ink); }
   table.picks { margin-top: 8px; font-size: 13px; }
   table.games { font-size: 13px; }
-  table.games td { border-bottom: none; padding-top: 5px; padding-bottom: 5px; }
-  table.games tr.gtop td { padding-bottom: 2px; }
-  table.games tr.gbot td { border-bottom: 1px solid var(--border); padding-top: 2px; }
-  table.games tbody tr:last-child td { border-bottom: none; }
-  table.games td.rootcell { vertical-align: middle; border-bottom: 1px solid var(--border); }
-  table.games tr:nth-last-child(2) td.rootcell, table.games tbody tr:last-child td { border-bottom: none; }
+  table.games td { padding-top: 5px; padding-bottom: 5px; }
+  .oppn { color: var(--ink-3); font-size: 11.5px; margin-left: 6px; }
   .stW { color: var(--money); font-weight: 600; font-size: 12px; }
   .stL { color: var(--bad); font-weight: 600; font-size: 12px; }
   .stP { color: var(--ink-3); font-size: 12px; }
@@ -179,11 +175,11 @@
     <div class="tiles" id="tiles"></div>
     <div class="strip" id="conStrip"></div>
     <div class="panel">
-      <h2>This week's games — all contests</h2>
-      <div class="sub">Click a team to record the winner · swing = total $ across the four pots ·
+      <h2>This week — all contests</h2>
+      <div class="sub">Click a team to record the winner · swing = total $ across the four pots if they win ·
         type in the Win % column to override the model</div>
       <div style="overflow-x:auto"><table class="games" id="rootTable"><thead>
-        <tr><th>Game</th><th class="num">Ours</th><th class="num">Ours %</th><th class="num">Field</th><th class="num">Field %</th><th class="num">Lev</th><th class="num">Win %</th><th>Rooting</th></tr>
+        <tr><th>Team</th><th class="num">Win %</th><th class="num">Ours</th><th class="num">Ours %</th><th class="num">Field</th><th class="num">Field %</th><th class="num">Lev</th><th class="num">Swing</th></tr>
       </thead><tbody id="rootBody"></tbody></table></div>
     </div>
   </div>
@@ -912,19 +908,22 @@ function wireGameTable(tbody) {
   });
   tbody.querySelectorAll("input.wpin").forEach(inp => inp.onchange = () => {
     const v = parseFloat(inp.value);
+    const away = inp.dataset.side === "away";   // stored as the HOME team's %
     if (isNaN(v) || v <= 0 || v >= 100) delete state.winp[inp.dataset.g];
-    else state.winp[inp.dataset.g] = v;
+    else state.winp[inp.dataset.g] = away ? 100 - v : v;
     touch();
   });
 }
 
-/* ---- main page: every game, aggregated across the four contests ---- */
+/* ---- main page: one row per TEAM, aggregated across the four contests, sorted by win prob ---- */
 function renderRooting(R) {
   let min0All = 0;
   for (const c of CONTEST_KEYS) if (R.base[c]) min0All += R.base[c].Min0;
-  const rows = R.games.map(({ g, k, settled, dTot, per, root }) => {
+  const teamRows = [];
+  let anyData = false;
+  for (const { g, k, settled, dTot, per } of R.games) {
     const res = resultOf(g);
-    const sides = [g.away, g.home].map(t => {
+    for (const t of [g.away, g.home]) {
       let mine = 0, fCnt = 0, fAlive = 0, any = false;
       for (const c of CONTEST_KEYS) {
         const s = statTeam(R.base[c], c, g, t);
@@ -932,39 +931,48 @@ function renderRooting(R) {
         mine += s.mine;
         if (s.alive > 0) { any = true; fCnt += s.fieldCnt; fAlive += s.alive; }
       }
-      return { t, mine,
+      if (any) anyData = true;
+      const sign = t === g.home ? 1 : -1;
+      const brk = per.map(p => `${CONTESTS[p.c].short} ${fmtSwing(p.d * sign)}`).join(" · ");
+      teamRows.push({
+        t, g, k, settled, res, mine,
         minePct: min0All ? 100 * mine / min0All : 0,
         fieldCnt: any ? fCnt : null,
-        fieldPct: any && fAlive > 0 ? 100 * fCnt / fAlive : null };
-    });
-    let rootCell;
-    if (settled) rootCell = `<span class="rooted done">Final — <b>${res}</b></span>`;
-    else if (Math.abs(dTot) < 0.5) rootCell = `<span class="rooted none">no stake</span>`;
-    else {
-      const brk = per.map(p => `${CONTESTS[p.c].short} ${fmtSwing(p.d * (root === g.home ? 1 : -1))}`).join(" · ");
-      rootCell = `<span class="rooted">${logo(root)} <b>${root}</b> <b class="sw">${fmtSwing(Math.abs(dTot))}</b></span>
-        <span class="brk">${brk}</span>`;
+        fieldPct: any && fAlive > 0 ? 100 * fCnt / fAlive : null,
+        swing: settled ? null : dTot * sign, brk,
+        wp: winP(t, g)
+      });
     }
-    const wpVal = Number(state.winp[k]);
-    const wpTyped = state.winp[k] != null && !isNaN(wpVal);
-    return sides.map((s, i) => {
-      const lev = levTxt(s.minePct, s.fieldPct);
-      const lost = res && res !== s.t;
-      const winCell = i === 0
-        ? `${Math.round(winP(g.away, g) * 100)}%`
-        : `<input class="cell wpin ${wpTyped ? "edited" : ""}" data-g="${k}" value="${wpTyped ? wpVal : ""}"
-             placeholder="${Math.round(winP(g.home, g) * 100)}" title="${g.home} win % — type to override the model">`;
-      return `<tr class="${settled ? "settled" : ""} ${lost ? "dead" : ""} ${i === 0 ? "gtop" : "gbot"}">
-        <td class="match">${resBtn(g, s.t, res)}</td>
-        <td class="num">${s.mine || ""}</td>
-        <td class="num s">${s.mine ? s.minePct.toFixed(1) + "%" : ""}</td>
-        <td class="num">${s.fieldCnt == null ? "—" : fmtN(s.fieldCnt)}</td>
-        <td class="num s">${s.fieldPct == null ? "—" : s.fieldPct.toFixed(1) + "%"}</td>
-        <td class="num ${lev.cls}">${lev.txt}</td>
-        <td class="num wp">${winCell}</td>
-        ${i === 0 ? `<td class="rootcell" rowspan="2">${rootCell}</td>` : ""}
-      </tr>`;
-    }).join("");
+  }
+  // once picks are in (any imported field or recorded picks), drop teams nobody is on
+  const shown = teamRows
+    .filter(r => !anyData || r.mine > 0 || r.fieldCnt > 0)
+    .sort((a, b) => b.wp - a.wp);
+  const rows = shown.map(r => {
+    const lev = levTxt(r.minePct, r.fieldPct);
+    const lost = r.res && r.res !== r.t;
+    const wpVal = Number(state.winp[r.k]);
+    const wpTyped = state.winp[r.k] != null && !isNaN(wpVal);
+    const shownPct = Math.round(r.wp * 100);
+    const winCell = r.settled
+      ? `${shownPct}%`
+      : `<input class="cell wpin ${wpTyped ? "edited" : ""}" data-g="${r.k}" data-side="${r.t === r.g.home ? "home" : "away"}"
+           value="${wpTyped ? (r.t === r.g.home ? wpVal : 100 - wpVal) : ""}" placeholder="${shownPct}"
+           title="${r.t} win % — type to override the model">`;
+    const swingCell = r.settled
+      ? `<span class="s2">${r.res === r.t ? "✓ won" : "✗ lost"}</span>`
+      : r.swing == null || Math.abs(r.swing) < 0.5 ? `<span class="s2">—</span>`
+      : `<span class="${r.swing >= 0 ? "pos" : "neg"}" title="${esc(r.brk)}">${fmtSwing(r.swing)}</span>`;
+    return `<tr class="${r.settled ? "settled" : ""} ${lost ? "dead" : ""}">
+      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}</span></td>
+      <td class="num wp">${winCell}</td>
+      <td class="num">${r.mine || ""}</td>
+      <td class="num s">${r.mine ? r.minePct.toFixed(1) + "%" : ""}</td>
+      <td class="num">${r.fieldCnt == null ? "—" : fmtN(r.fieldCnt)}</td>
+      <td class="num s">${r.fieldPct == null ? "—" : r.fieldPct.toFixed(1) + "%"}</td>
+      <td class="num ${lev.cls}">${lev.txt}</td>
+      <td class="num">${swingCell}</td>
+    </tr>`;
   }).join("");
   $("rootBody").innerHTML = rows || `<tr><td colspan="8" class="empty">no games this week</td></tr>`;
   wireGameTable($("rootBody"));
@@ -982,25 +990,36 @@ function renderContestView(c, b) {
   const missing = b.missingField.length && !b.noNames
     ? `<div class="hint">No field data for ${b.missingField.join(", ")} — paste the selections below.</div>` : "";
 
-  // every game of this contest's current-week legs, two rows per game, in the shared rooting order
+  // one row per TEAM playing this contest's current-week legs, sorted by win prob;
+  // once picks exist for a leg, teams nobody is on disappear
   const R = renderContestView._R;
-  const gameRows = (R ? R.games : []).map(({ g, settled }) => {
+  const legsWithMyPicks = new Set(b.rows.filter(r => r.mine > 0).map(r => r.leg));
+  const teamRows = [];
+  for (const { g, settled } of (R ? R.games : [])) {
+    const leg = legsForWeek(c, g.week).find(l => l.games.some(x => x === g));
+    if (!leg) continue;
     const res = resultOf(g);
-    return [g.away, g.home].map((t, i) => {
+    const dataIn = !b.missingField.includes(leg.id) || legsWithMyPicks.has(leg.id);
+    for (const t of [g.away, g.home]) {
       const s = statTeam(b, c, g, t) || { mine: 0, minePct: 0, fieldCnt: null, fieldPct: null };
-      const lev = levTxt(s.minePct, s.fieldPct);
-      const lost = res && res !== t;
-      const leg = b.legs.length > 1 ? legsForWeek(c, g.week).find(l => l.games.some(x => x === g)) : null;
-      return `<tr class="${settled ? "settled" : ""} ${lost ? "dead" : ""} ${i === 0 ? "gtop" : "gbot"}">
-        <td class="match">${resBtn(g, t, res)}${i === 0 && leg ? ` <span class="s2">${leg.id}</span>` : ""}</td>
-        <td class="num">${s.mine || ""}</td>
-        <td class="num s">${s.mine ? s.minePct.toFixed(1) + "%" : ""}</td>
-        <td class="num">${s.fieldCnt == null ? "—" : fmtN(s.fieldCnt)}</td>
-        <td class="num s">${s.fieldPct == null ? "—" : s.fieldPct.toFixed(1) + "%"}</td>
-        <td class="num ${lev.cls}">${lev.txt}</td>
-        <td class="num s">${Math.round(winP(t, g) * 100)}%</td>
-      </tr>`;
-    }).join("");
+      if (dataIn && !s.mine && !(s.fieldCnt > 0)) continue;
+      teamRows.push({ t, g, leg, settled, res, s, wp: winP(t, g) });
+    }
+  }
+  teamRows.sort((a, b2) => b2.wp - a.wp);
+  const gameRows = teamRows.map(r => {
+    const lev = levTxt(r.s.minePct, r.s.fieldPct);
+    const lost = r.res && r.res !== r.t;
+    const status = r.res ? (r.res === r.t ? ` <span class="stW">✓</span>` : ` <span class="stL">✗</span>`) : "";
+    return `<tr class="${r.settled ? "settled" : ""} ${lost ? "dead" : ""}">
+      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${status}</td>
+      <td class="num s">${Math.round(r.wp * 100)}%</td>
+      <td class="num">${r.s.mine || ""}</td>
+      <td class="num s">${r.s.mine ? r.s.minePct.toFixed(1) + "%" : ""}</td>
+      <td class="num">${r.s.fieldCnt == null ? "—" : fmtN(r.s.fieldCnt)}</td>
+      <td class="num s">${r.s.fieldPct == null ? "—" : r.s.fieldPct.toFixed(1) + "%"}</td>
+      <td class="num ${lev.cls}">${lev.txt}</td>
+    </tr>`;
   }).join("");
 
   cv.innerHTML = `<div class="panel">
@@ -1016,7 +1035,7 @@ function renderContestView(c, b) {
     </div>
     ${cohort}${noNames}${missing}
     <div style="overflow-x:auto"><table class="games"><thead>
-      <tr><th>Game</th><th class="num">Ours</th><th class="num">Ours %</th><th class="num">Field</th><th class="num">Field %</th><th class="num">Lev</th><th class="num">Win %</th></tr>
+      <tr><th>Team</th><th class="num">Win %</th><th class="num">Ours</th><th class="num">Ours %</th><th class="num">Field</th><th class="num">Field %</th><th class="num">Lev</th></tr>
     </thead><tbody id="cGames">${gameRows}</tbody></table></div>
     <details data-id="picks-${c}"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
     <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>
