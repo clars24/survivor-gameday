@@ -787,6 +787,7 @@ async function connectShared() {
     setChip("live", "live · shared");
   } catch (err) {
     setChip("off", "sync offline — local view");
+    setTimeout(connectShared, 15000);          // keep trying: phones lose signal, rules propagate, etc.
   }
 }
 
