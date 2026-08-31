@@ -623,7 +623,7 @@ const fmtN = v => v >= 100 ? Math.round(v).toLocaleString("en-US") : (Math.round
  * live (pull + EventSource stream); edits push as multi-path PATCH diffs every 2.5s with per-key merge.
  * New visitors land in spectator mode — a click enables editing (accident prevention, not security).
  * If the database is unreachable the page still works read-your-own-copy off localStorage. */
-const SYNC_URL = "https://survivor-c36ad-default-rtdb.firebaseio.com/gameday2026";
+const SYNC_URL = "https://survivor-gameday-default-rtdb.firebaseio.com/gameday2026";
 const SYNC_KEYS = ["names", "mine", "field", "sizes", "results", "winp", "money", "_sync"];
 const SYNC_DEPTH = { names: 2, mine: 3, field: 3, sizes: 1, results: 1, winp: 1, money: 2, _sync: 1 };
 const glue = { last: "", es: null, timer: null, pushing: false, pendingRemote: null, on: false,
