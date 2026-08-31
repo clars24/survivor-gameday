@@ -336,8 +336,11 @@ function normalizeState() {
   if (!state.money.pots) state.money.pots = {};
   if (!state.money.fees) state.money.fees = {};
 }
-function feeOf(c)  { const o = state.money.fees[c]; return o > 0 ? o : CONTESTS[c].fee; }
-function resultOf(g) { return state.results[gameKey(g)] || null; }
+function feeOf(c)  { const o = Number(state.money.fees[c]); return o > 0 ? o : CONTESTS[c].fee; }
+/* Everything read back from the shared store is validated before use: team tokens against NAMES,
+ * numbers through Number(). The store is world-writable by design, so the page must stay safe even
+ * against hand-crafted junk written directly into it. */
+function resultOf(g) { const r = state.results[gameKey(g)]; return r === g.home || r === g.away ? r : null; }
 
 /* ============================== PARSERS ============================== */
 const POOL_NICK = {
@@ -432,8 +435,11 @@ function ingestEntryRows(c, rows) {
 }
 
 /* ============================== EV ENGINE ============================== */
-function pickTeams(v) { return v == null ? [] : Array.isArray(v) ? v.filter(Boolean) : [v]; }
-function winnerOf(g, hyp) { return (hyp && hyp[gameKey(g)]) || state.results[gameKey(g)] || null; }
+function pickTeams(v) { return (v == null ? [] : Array.isArray(v) ? v : [v]).filter(t => NAMES[t]); }
+function winnerOf(g, hyp) {
+  const w = (hyp && hyp[gameKey(g)]) || state.results[gameKey(g)] || null;
+  return w === g.home || w === g.away ? w : null;
+}
 function gameOfTeam(leg, t) { return leg.games.find(g => g.home === t || g.away === t) || null; }
 function teamLostIn(leg, t, hyp) {
   const g = gameOfTeam(leg, t);
@@ -444,12 +450,12 @@ function teamLostIn(leg, t, hyp) {
 function startN(c) {
   const first = CONTESTS[c].legs[0].id;
   const fd = state.field[c][first];
-  if (fd && fd.alive > 0) return fd.alive;
-  if (state.sizes[c] > 0) return state.sizes[c];
+  if (fd && Number(fd.alive) > 0) return Number(fd.alive);
+  if (Number(state.sizes[c]) > 0) return Number(state.sizes[c]);
   return CONTESTS[c].defaultN;
 }
 function potOf(c) {
-  const o = state.money.pots[c];
+  const o = Number(state.money.pots[c]);
   if (o > 0) return o;
   if (CONTESTS[c].potFixed) return CONTESTS[c].potFixed;
   return feeOf(c) * startN(c);
@@ -560,6 +566,7 @@ function contestWeekEV(c, w, hyp) {
       mineCnt[t] = (mineCnt[t] || 0) + 1; teams.add(t);
     }
     for (const t of teams) {
+      if (!NAMES[t]) continue;                 // never render a team token that isn't a real team
       const g = gameOfTeam(leg, t);
       const wnr = g ? winnerOf(g, null) : null;
       rows.push({
@@ -861,7 +868,8 @@ function renderRooting(R) {
         title="${on ? "click to clear" : NAMES[t] + " won"}">${logo(t)} ${t}</button>`;
     };
     const pHome = Math.round(winP(g.home, g) * 100);
-    const wpTyped = state.winp[k] != null;
+    const wpVal = Number(state.winp[k]);
+    const wpTyped = state.winp[k] != null && !isNaN(wpVal);
     let mid;
     if (settled) {
       mid = `<span class="rooted done">Final — ${logo(res)} <b>${res}</b> won</span>`;
@@ -877,7 +885,7 @@ function renderRooting(R) {
       <td class="match">${side(g.away)}<span class="at">@</span>${side(g.home)}</td>
       <td class="mid">${mid}</td>
       <td class="num wp"><input class="cell wpin ${wpTyped ? "edited" : ""}" data-g="${k}"
-            value="${wpTyped ? state.winp[k] : ""}" placeholder="${pHome}" title="Home team (${g.home}) win %"> <span class="s">${g.home}%</span></td>
+            value="${wpTyped ? wpVal : ""}" placeholder="${pHome}" title="Home team (${g.home}) win %"> <span class="s">${g.home}%</span></td>
     </tr>`;
   }).join("");
   $("rootBody").innerHTML = rows ||
@@ -996,11 +1004,11 @@ function renderSetup() {
           <textarea class="nms" data-c="${c}" rows="4">${esc((state.names[c] || []).join("\n"))}</textarea></label>
         <div>
           <label>Field size <span class="s2">(fallback until a week-1 import)</span>
-            <input class="cell szin" data-c="${c}" value="${state.sizes[c] || ""}" placeholder="${C.defaultN}"></label>
+            <input class="cell szin" data-c="${c}" value="${Number(state.sizes[c]) || ""}" placeholder="${C.defaultN}"></label>
           <label>Pot override <span class="s2">($; blank = ${C.potFixed ? fmtMoney(C.potFixed) + " guaranteed" : "fee × entries"})</span>
-            <input class="cell potin" data-c="${c}" value="${state.money.pots[c] || ""}" placeholder="${C.potFixed || feeOf(c) * (state.sizes[c] || C.defaultN)}"></label>
+            <input class="cell potin" data-c="${c}" value="${Number(state.money.pots[c]) || ""}" placeholder="${C.potFixed || feeOf(c) * (Number(state.sizes[c]) || C.defaultN)}"></label>
           <label>Entry fee <span class="s2">($)</span>
-            <input class="cell feein" data-c="${c}" value="${state.money.fees[c] || ""}" placeholder="${C.fee}"></label>
+            <input class="cell feein" data-c="${c}" value="${Number(state.money.fees[c]) || ""}" placeholder="${C.fee}"></label>
         </div>
         <label>Import field picks — leg
           <select class="implegsel" data-c="${c}">${legOpts}</select>
