@@ -131,6 +131,14 @@
   .cev .s { color: var(--ink-3); }
   .alive { margin: 10px 0 2px; font-size: 13px; color: var(--ink-2); }
   .alive b { color: var(--ink); }
+  .statrow { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 2px; }
+  .statrow .stat { background: var(--card-2); border-radius: 10px; padding: 8px 14px; min-width: 150px; }
+  .statrow .k { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--ink-3); font-weight: 600; }
+  .statrow .v { display: block; font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-weight: 700;
+    font-size: 24px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .statrow .of { color: var(--ink-3); font-size: 15px; font-weight: 600; }
+  .statrow .s2 { display: block; margin-top: 1px; }
   table.picks { margin-top: 8px; font-size: 13px; }
   table.games { font-size: 13px; }
   table.games td { padding-top: 5px; padding-bottom: 5px; }
@@ -146,6 +154,17 @@
   select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px;
     background: var(--ground); color: var(--ink); font: inherit; font-size: 13px; }
 
+  .subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 12px 0 10px; }
+  .subtabs button { background: none; border: none; border-bottom: 2px solid transparent; color: var(--ink-3);
+    padding: 5px 12px 7px; cursor: pointer; font: 600 12px "IBM Plex Sans", sans-serif;
+    text-transform: uppercase; letter-spacing: .07em; margin-bottom: -1px; }
+  .subtabs button:hover { color: var(--ink-2); }
+  .subtabs button.on { color: var(--ink); border-bottom-color: var(--act); }
+  .btn.on { background: var(--act-soft); border-color: var(--act); color: var(--ink); }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--ink-2); }
+  tr.mineRow td { background: var(--act-soft); }
+  input.search { width: 200px; text-align: left; }
   .setgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
   @media (max-width: 700px) { .setgrid { grid-template-columns: 1fr; } }
   .setgrid label { display: block; font-size: 12.5px; color: var(--ink-2); margin-bottom: 8px; }
@@ -305,6 +324,7 @@ function normalizeState() {
     for (const c of CONTEST_KEYS) if (!state[k][c]) state[k][c] = k === "names" ? [] : {};
   }
   for (const k of ["sizes", "results", "winp"]) if (!state[k]) state[k] = {};
+  if (!state.pool) state.pool = {};        // packed entry-level pool (see packPool)
   if (!state.money) state.money = { pots: {}, fees: {} };
   if (!state.money.pots) state.money.pots = {};
   if (!state.money.fees) state.money.fees = {};
@@ -404,7 +424,64 @@ function ingestEntryRows(c, rows) {
     legs.push(legId + " (" + L.entries.size + " entries)");
   }
   const unmatched = [...mineSet.values()].filter(n => !matched.has(n));
+  poolIngest(c, rows);
   return { legs, matched: [...matched], unmatched, total: rows.length };
+}
+
+/* ---- entry-level pool: every entry's selections, kept for the Entries view ----
+ * Stored packed (roster newline-joined once + ONE CHAR PER PICK per leg, "." = no pick), the encoding
+ * the EV Board uses for the same data — a 18k-entry week is ~18KB instead of ~300KB of JSON. */
+let pool = {};   // pool[c] = { names: [], index: {}, legs: { legId: [pick | [picks] per roster idx] } }
+const POOL_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef";
+const POOL_ORDER = TEAMS.slice().sort();
+const POOL_IDX = POOL_ORDER.reduce((m, t, i) => (m[t] = i, m), {});
+function poolFor(c) { return pool[c] || (pool[c] = { names: [], index: {}, legs: {} }); }
+function poolIngest(c, rows) {
+  const P = poolFor(c);
+  for (const r of rows) {
+    let i = P.index[r.entry];
+    if (i === undefined) { i = P.names.length; P.names.push(r.entry); P.index[r.entry] = i; }
+    const col = P.legs[r.leg] || (P.legs[r.leg] = []);
+    const cur = col[i];
+    if (cur == null) col[i] = r.pick;
+    else if (Array.isArray(cur)) { if (!cur.includes(r.pick)) cur.push(r.pick); }
+    else if (cur !== r.pick) col[i] = [cur, r.pick];
+  }
+}
+function packPool(c) {
+  const P = poolFor(c), legs = {};
+  for (const legId in P.legs) {
+    const width = (legById(c, legId) || { picks: 1 }).picks;
+    const col = P.legs[legId];
+    let out = "";
+    for (let i = 0; i < P.names.length; i++) {
+      const picks = pickTeams(col[i]);
+      for (let s = 0; s < width; s++)
+        out += picks[s] && POOL_IDX[picks[s]] !== undefined ? POOL_ALPHA[POOL_IDX[picks[s]]] : ".";
+    }
+    legs[legId] = out;
+  }
+  return { roster: P.names.join("\n"), legs };
+}
+function unpackPool(c, payload) {
+  if (!payload || !payload.roster) return;
+  const names = String(payload.roster).split("\n").filter(x => x.length);
+  const P = { names, index: {}, legs: {} };
+  names.forEach((n, i) => P.index[n] = i);
+  for (const legId in (payload.legs || {})) {
+    const width = (legById(c, legId) || { picks: 1 }).picks;
+    const str = String(payload.legs[legId]), col = [];
+    for (let i = 0; i < names.length; i++) {
+      const picks = [];
+      for (let s = 0; s < width; s++) {
+        const k = POOL_ALPHA.indexOf(str.charAt(i * width + s));
+        if (k >= 0) picks.push(POOL_ORDER[k]);
+      }
+      if (picks.length) col[i] = picks.length === 1 ? picks[0] : picks;
+    }
+    P.legs[legId] = col;
+  }
+  pool[c] = P;
 }
 
 /* ============================== EV ENGINE ============================== */
@@ -773,6 +850,24 @@ async function connectShared() {
     setTimeout(connectShared, 15000);          // keep trying: phones lose signal, rules propagate, etc.
   }
 }
+/* entry-level pool lives at its own DB path — written once per import, fetched once per visit,
+ * deliberately OUTSIDE the 2.5s diff loop so 18k-entry rosters never ride every push. */
+function poolPersist(c) {
+  const payload = packPool(c);
+  try { localStorage.setItem("gamedayPool_" + c, JSON.stringify(payload)); } catch (e) {}
+  fetch(SYNC_URL + "/pool/" + c + ".json", { method: "PUT",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
+}
+async function poolRestore() {
+  let got = false;
+  for (const c of CONTEST_KEYS) {
+    let payload = null;
+    try { const r = await fetch(SYNC_URL + "/pool/" + c + ".json"); if (r.ok) payload = await r.json(); } catch (e) {}
+    if (!payload) { try { payload = JSON.parse(localStorage.getItem("gamedayPool_" + c)); } catch (e) {} }
+    if (payload) { unpackPool(c, payload); got = true; }
+  }
+  if (got) render();
+}
 
 /* ============================== VIEWS ============================== */
 const $ = id => document.getElementById(id);
@@ -1029,20 +1124,109 @@ function renderContestView(c, b) {
       <div class="cev"><div class="k">EV now</div><div class="v ${b.evNow > 0 ? "pos" : ""}">${fmtMoney(b.evNow)}</div>
         <div class="s">expected ${fmtMoney(b.evExp)}</div></div>
     </div>
-    <div class="alive">
-      Ours <b>${b.M}</b>/${b.Min0} · Field <b>${fmtN(b.F)}</b>/${fmtN(b.Fin0)}${est}
-      <span class="s2">(${b.src})</span> · our share <b>${b.F > 0 ? (100 * b.M / Math.max(b.F, b.M)).toFixed(2) : "0"}%</b>
+    <div class="statrow">
+      <div class="stat"><span class="k">Ours alive</span>
+        <span class="v">${b.M}<span class="of">/${(state.names[c] || []).length} started</span></span>
+        <span class="s2">${b.Min0} entered the week</span></div>
+      <div class="stat"><span class="k">Field alive</span>
+        <span class="v">${fmtN(b.F)}<span class="of">/${fmtN(startN(c))} started</span>${est}</span>
+        <span class="s2">${fmtN(b.Fin0)} entered the week · ${b.src}</span></div>
+      <div class="stat"><span class="k">Our share</span>
+        <span class="v">${b.F > 0 ? (100 * b.M / Math.max(b.F, b.M)).toFixed(2) : "0"}%</span>
+        <span class="s2">of live entries</span></div>
     </div>
     ${cohort}${noNames}${missing}
-    <div style="overflow-x:auto"><table class="games"><thead>
-      <tr><th>Team</th><th class="num">Win %</th><th class="num">Ours</th><th class="num">Ours %</th><th class="num">Field</th><th class="num">Field %</th><th class="num">Lev</th></tr>
-    </thead><tbody id="cGames">${gameRows}</tbody></table></div>
-    <details data-id="picks-${c}"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
-    <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>
+    <div class="subtabs">
+      <button data-s="board" class="${subTab === "board" ? "on" : ""}">Board</button>
+      <button data-s="entries" class="${subTab === "entries" ? "on" : ""}">Entries${pool[c] && pool[c].names.length ? " (" + fmtN(pool[c].names.length) + ")" : ""}</button>
+    </div>
+    ${subTab === "entries" ? `
+      <div class="pairrow" style="margin-bottom:8px">
+        <input class="cell search" id="entSearch" placeholder="search entries…" value="${esc(entQuery)}">
+        <button class="btn ${entMine ? "on" : ""}" id="entMineBtn">My entries</button>
+        <span class="s2" id="entCount"></span>
+      </div>
+      <div style="overflow-x:auto" id="entList"></div>`
+    : `
+      <div style="overflow-x:auto"><table class="games"><thead>
+        <tr><th>Team</th><th class="num">Win %</th><th class="num">Ours</th><th class="num">Ours %</th><th class="num">Field</th><th class="num">Field %</th><th class="num">Lev</th></tr>
+      </thead><tbody id="cGames">${gameRows}</tbody></table></div>
+      <details data-id="picks-${c}"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
+      <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>`}
   </div>`;
   trackDetails(cv);
-  wireGameTable($("cGames"));
-  wireContestView(c);
+  cv.querySelectorAll(".subtabs button").forEach(btn => btn.onclick = () => {
+    subTab = btn.dataset.s; render();
+  });
+  if (subTab === "entries") {
+    const se = $("entSearch");
+    se.oninput = () => { entQuery = se.value; renderEntList(c, b); };
+    $("entMineBtn").onclick = () => {
+      entMine = !entMine;
+      $("entMineBtn").className = "btn " + (entMine ? "on" : "");
+      renderEntList(c, b);
+    };
+    renderEntList(c, b);
+  } else {
+    wireGameTable($("cGames"));
+    wireContestView(c);
+  }
+}
+
+/* ---- Entries sub-tab: every entry's selection, sortable, searchable, my-entries filter ---- */
+let subTab = "board", entQuery = "", entMine = false, entSort = { key: "name", dir: 1 };
+const ENT_CAP = 500;
+function renderEntList(c, b) {
+  const el = $("entList"); if (!el) return;
+  const P = pool[c];
+  if (!P || !P.names.length) {
+    el.innerHTML = `<div class="hint">No entry-level selections yet — paste the selections PDF/CSV under
+      Board → Setup &amp; import and every entry shows up here.</div>`;
+    $("entCount").textContent = "";
+    return;
+  }
+  const legs = b.legs;
+  const mineSet = myNameSet(c);
+  let rows = P.names.map((n, i) => ({
+    n, i,
+    picks: legs.map(l => pickTeams((P.legs[l.id] || [])[i])),
+    mine: mineSet.has(String(n).trim().toUpperCase())
+  }));
+  if (entMine) rows = rows.filter(r => r.mine);
+  const q = entQuery.trim().toUpperCase();
+  if (q) rows = rows.filter(r => String(r.n).toUpperCase().includes(q));
+  const total = rows.length, dir = entSort.dir;
+  rows.sort((a, b2) => {
+    if (entSort.key === "name") return dir * String(a.n).localeCompare(String(b2.n));
+    const pa = a.picks[0][0] || "~", pb = b2.picks[0][0] || "~";   // no-pick sorts last
+    return dir * pa.localeCompare(pb) || String(a.n).localeCompare(String(b2.n));
+  });
+  const shown = rows.slice(0, ENT_CAP);
+  const arrow = k => entSort.key === k ? (dir > 0 ? " ▲" : " ▼") : "";
+  const legTh = legs.map((l, li) => `<th class="sortable num" data-k="pick">${legs.length > 1 ? l.id : "Selection"}${li === 0 ? arrow("pick") : ""}</th>`).join("");
+  const body = shown.map(r => {
+    const cells = legs.map((leg, li) => {
+      const ps = r.picks[li];
+      if (!ps.length) return `<td class="num s2">—</td>`;
+      const html = ps.map(t => {
+        const g = gameOfTeam(leg, t);
+        const w = g ? winnerOf(g, null) : null;
+        const cls = w ? (w === t ? "stW" : "stL") : "";
+        return `<span class="${cls}">${logo(t)} ${t}</span>`;
+      }).join(" + ");
+      return `<td class="num" style="white-space:nowrap">${html}</td>`;
+    }).join("");
+    return `<tr class="${r.mine ? "mineRow" : ""}"><td>${esc(r.n)}</td>${cells}</tr>`;
+  }).join("");
+  el.innerHTML = `<table class="games"><thead>
+    <tr><th class="sortable" data-k="name">Entry${arrow("name")}</th>${legTh}</tr>
+  </thead><tbody>${body}</tbody></table>`;
+  $("entCount").textContent = (shown.length < total ? `showing ${fmtN(shown.length)} of ` : "") + `${fmtN(total)} entries`;
+  el.querySelectorAll("th.sortable").forEach(th => th.onclick = () => {
+    const k = th.dataset.k;
+    if (entSort.key === k) entSort.dir = -entSort.dir; else entSort = { key: k, dir: 1 };
+    renderEntList(c, b);
+  });
 }
 
 function pickEditorHtml(c, b) {
@@ -1143,6 +1327,7 @@ function runImport(c) {
   let msg = null;
   if (rows.length >= 3) {
     const sum = ingestEntryRows(c, rows);
+    poolPersist(c);
     msg = `✓ ${sum.total} picks → ${sum.legs.join(", ")}`;
     if (sum.matched.length) msg += ` · matched ${sum.matched.length} of our entries`;
     if (sum.unmatched.length) msg += ` · ⚠ not found: ${sum.unmatched.slice(0, 5).join(", ")}${sum.unmatched.length > 5 ? "…" : ""}`;
@@ -1209,6 +1394,7 @@ function wireHeader() {
   const embedded = loadEmbedded();
   if (!embedded) lsLoad();          // local-file / preview fallback
   normalizeState();
+  poolRestore();
   wireHeader();
   render();
   connectShared();
