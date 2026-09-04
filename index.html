@@ -424,8 +424,9 @@ function ingestEntryRows(c, rows) {
     if (mineName) {
       matched.add(mineName);
       const M = state.mine[c][mineName] || (state.mine[c][mineName] = {});
+      const width = (legById(c, r.leg) || { picks: 1 }).picks;
       const cur = M[r.leg];
-      if (cur == null) M[r.leg] = r.pick;
+      if (cur == null || width < 2) M[r.leg] = r.pick;         // single-pick leg: a re-import REPLACES
       else if (Array.isArray(cur)) { if (!cur.includes(r.pick)) cur.push(r.pick); }
       else if (cur !== r.pick) M[r.leg] = [cur, r.pick];
     }
@@ -455,8 +456,9 @@ function poolIngest(c, rows) {
     let i = P.index[r.entry];
     if (i === undefined) { i = P.names.length; P.names.push(r.entry); P.index[r.entry] = i; }
     const col = P.legs[r.leg] || (P.legs[r.leg] = []);
+    const width = (legById(c, r.leg) || { picks: 1 }).picks;
     const cur = col[i];
-    if (cur == null) col[i] = r.pick;
+    if (cur == null || width < 2) col[i] = r.pick;             // single-pick leg: a re-import REPLACES
     else if (Array.isArray(cur)) { if (!cur.includes(r.pick)) cur.push(r.pick); }
     else if (cur !== r.pick) col[i] = [cur, r.pick];
   }
@@ -1075,6 +1077,22 @@ function renderStrip(R) {
 }
 
 /* ---- shared game-table pieces ---- */
+let mainSort = { key: "wp", dir: -1 }, boardSort = { key: "wp", dir: -1 };
+function sortArrow(s, k) { return s.key === k ? (s.dir > 0 ? " ▲" : " ▼") : ""; }
+/** Numeric compare with nulls always last, whatever the direction. */
+function cmpNum(a, b, dir) {
+  const an = a == null || isNaN(a), bn = b == null || isNaN(b);
+  if (an && bn) return 0; if (an) return 1; if (bn) return -1;
+  return dir * (a - b);
+}
+function wireSort(head, s, rerender) {
+  if (!head) return;
+  head.querySelectorAll("th.sortable").forEach(th => th.onclick = () => {
+    const k = th.dataset.k;
+    if (s.key === k) s.dir = -s.dir; else { s.key = k; s.dir = k === "team" ? 1 : -1; }
+    rerender();
+  });
+}
 /* Results are sourced exclusively from the ESPN feed — the team chip is display only. */
 function resBtn(g, t, res) {
   const on = res === t;
@@ -1108,9 +1126,10 @@ function statTeam(b, c, g, t) {
  * deliberately NO cross-contest entry counts: a Grandissimo entry is worth ~100x a Splash 100 entry,
  * so mixed counts and percentages mislead. Counts live on each contest's own tab. ---- */
 function renderRooting(R) {
-  $("rootHead").innerHTML = `<tr><th>Team</th><th class="num">Win %</th>
-    ${CONTEST_KEYS.map(c => `<th class="num">${esc(CONTESTS[c].short)}</th>`).join("")}
-    <th class="num">Total</th></tr>`;
+  $("rootHead").innerHTML = `<tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
+    <th class="num sortable" data-k="wp">Win %${sortArrow(mainSort, "wp")}</th>
+    ${CONTEST_KEYS.map(c => `<th class="num sortable" data-k="${c}">${esc(CONTESTS[c].short)}${sortArrow(mainSort, c)}</th>`).join("")}
+    <th class="num sortable" data-k="total">Total${sortArrow(mainSort, "total")}</th></tr>`;
   const teamRows = [];
   let anyData = false;
   for (const { g, k, settled, dTot, per } of R.games) {
@@ -1133,7 +1152,14 @@ function renderRooting(R) {
   // once picks are in (any imported field or recorded picks), drop teams nobody is on
   const shown = teamRows
     .filter(r => !anyData || r.mine > 0 || r.fCnt > 0)
-    .sort((a, b) => b.wp - a.wp);
+    .sort((a, b) => {
+      if (mainSort.key === "team") return mainSort.dir * a.t.localeCompare(b.t) || b.wp - a.wp;
+      let av, bv;
+      if (mainSort.key === "wp") { av = a.wp; bv = b.wp; }
+      else if (mainSort.key === "total") { av = a.settled ? null : a.swing; bv = b.settled ? null : b.swing; }
+      else { av = a.settled ? null : a.perT[mainSort.key]; bv = b.settled ? null : b.perT[mainSort.key]; }
+      return cmpNum(av, bv, mainSort.dir) || (b.wp - a.wp);
+    });
   const money = (v) => v == null || isNaN(v) ? `<span class="s2">—</span>`
     : Math.abs(v) < 0.5 ? `<span class="s2">—</span>`
     : `<span class="${v >= 0 ? "pos" : "neg"}">${fmtSwing(v)}</span>`;
@@ -1153,6 +1179,7 @@ function renderRooting(R) {
     </tr>`;
   }).join("");
   $("rootBody").innerHTML = rows || `<tr><td colspan="${3 + CONTEST_KEYS.length}" class="empty">no games this week</td></tr>`;
+  wireSort($("rootHead"), mainSort, () => renderRooting(R));
 }
 
 function renderContestView(c, b) {
@@ -1183,7 +1210,14 @@ function renderContestView(c, b) {
       teamRows.push({ t, g, leg, settled, res, s, wp: winP(t, g) });
     }
   }
-  teamRows.sort((a, b2) => b2.wp - a.wp);
+  const levVal = r => r.s.fieldPct == null ? null : !r.s.minePct ? 0 : r.s.fieldPct === 0 ? Infinity : r.s.minePct / r.s.fieldPct;
+  teamRows.sort((a, b2) => {
+    const K = boardSort.key, d = boardSort.dir;
+    if (K === "team") return d * a.t.localeCompare(b2.t) || b2.wp - a.wp;
+    const val = r => K === "wp" ? r.wp : K === "ours" ? r.s.mine : K === "ourspct" ? r.s.minePct
+      : K === "field" ? r.s.fieldCnt : K === "fieldpct" ? r.s.fieldPct : levVal(r);
+    return cmpNum(val(a), val(b2), d) || (b2.wp - a.wp);
+  });
   const gameRows = teamRows.map(r => {
     const lev = levTxt(r.s.minePct, r.s.fieldPct);
     const lost = r.res && r.res !== r.t;
@@ -1230,8 +1264,14 @@ function renderContestView(c, b) {
       </div>
       <div style="overflow-x:auto" id="entList"></div>`
     : `
-      <div style="overflow-x:auto"><table class="games even"><thead>
-        <tr><th>Team</th><th class="num">Win %</th><th class="num">Ours</th><th class="num">Ours %</th><th class="num">Field</th><th class="num">Field %</th><th class="num">Lev</th></tr>
+      <div style="overflow-x:auto"><table class="games even"><thead id="cHead">
+        <tr><th class="sortable" data-k="team">Team${sortArrow(boardSort, "team")}</th>
+        <th class="num sortable" data-k="wp">Win %${sortArrow(boardSort, "wp")}</th>
+        <th class="num sortable" data-k="ours">Ours${sortArrow(boardSort, "ours")}</th>
+        <th class="num sortable" data-k="ourspct">Ours %${sortArrow(boardSort, "ourspct")}</th>
+        <th class="num sortable" data-k="field">Field${sortArrow(boardSort, "field")}</th>
+        <th class="num sortable" data-k="fieldpct">Field %${sortArrow(boardSort, "fieldpct")}</th>
+        <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th></tr>
       </thead><tbody id="cGames">${gameRows}</tbody></table></div>
       <details data-id="picks-${c}"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
       <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>`}
@@ -1250,6 +1290,7 @@ function renderContestView(c, b) {
     };
     renderEntList(c, b);
   } else {
+    wireSort($("cHead"), boardSort, render);
     wireContestView(c);
   }
 }
