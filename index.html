@@ -61,6 +61,15 @@
   .banner { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--warn);
     border-radius: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--ink-2); margin: 0 0 14px; }
 
+  .root5 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
+  .r5label { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--ink-3); font-weight: 600; font-size: 15px; }
+  .r5chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px 5px 8px; font-weight: 600; font-size: 13px; }
+  .r5chip .rk { color: var(--ink-3); font-size: 11px; font-weight: 700; }
+  .r5chip .r5v { color: var(--money); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .panel .root5 { margin: 8px 0 12px; }
+  .panel .r5chip { background: var(--card-2); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 0 0 12px; }
   .tile { background: var(--card); border-radius: 14px; padding: 13px 16px 11px; }
   .tile .k { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); font-weight: 600; }
@@ -192,6 +201,7 @@
   <div class="banner" id="roBanner" style="display:none"></div>
 
   <div id="viewAll">
+    <div id="root5All"></div>
     <div class="tiles" id="tiles"></div>
     <div class="strip" id="conStrip"></div>
     <div class="panel">
@@ -380,9 +390,17 @@ function parseEntryRows(text, defaultLeg, contest) {
       rows.push({ entry: parts[0], leg: defaultLeg, pick: teamTok(parts[1]) });
       continue;
     }
-    if (/^entry\b/i.test(raw) || /^(entry name|selection)$/i.test(raw) || /^week \d+ selections$/i.test(raw)) {
+    if (/^entry\b/i.test(raw) || /^(entry name|selection)$/i.test(raw) || /^week \d+\w* selections$/i.test(raw)) {
       pending = null; continue;
     }
+    // tabular PDF layout: one visual row holds several "NAME  NN. NICKNAME PK" pairs side by side
+    let mm, found = 0;
+    const PAIR = /(\S(?:.*?\S)?)\s+\d+\.\s+([A-Z0-9''-]+)\s+PK\b/gi;
+    while ((mm = PAIR.exec(raw))) {
+      const team = teamTok(mm[2]);
+      if (team && defaultLeg) { rows.push({ entry: mm[1].trim(), leg: defaultLeg, pick: team }); found++; }
+    }
+    if (found) { pending = null; continue; }
     const m = raw.match(SEL);
     if (m) {
       const team = teamTok(m[2]);
@@ -991,6 +1009,7 @@ function render() {
   $("viewAll").style.display = showAll ? "" : "none";
   $("contestView").style.display = showAll ? "none" : "";
   if (showAll) {
+    $("root5All").innerHTML = top5Html(R, null);
     renderTiles(R);
     renderStrip(R);
     renderRooting(R);
@@ -1121,6 +1140,27 @@ function statTeam(b, c, g, t) {
   };
 }
 
+/** Top 5 teams to root for: biggest positive $ swing if they win. contest=null → total across all four;
+ *  a contest key → that contest's swing only. Settled games drop out, so it thins as the day plays. */
+function top5Html(R, contest) {
+  const list = [];
+  for (const { g, settled, dTot, per } of R.games) {
+    if (settled) continue;
+    for (const t of [g.away, g.home]) {
+      const sign = t === g.home ? 1 : -1;
+      let v;
+      if (contest) { const p = per.find(x => x.c === contest); v = p ? p.d * sign : 0; }
+      else v = dTot * sign;
+      if (v > 0.5) list.push({ t, v });
+    }
+  }
+  list.sort((a, b) => b.v - a.v);
+  const top = list.slice(0, 5);
+  if (!top.length) return "";
+  return `<div class="root5"><span class="r5label">Root for</span>` + top.map((x, i) =>
+    `<span class="r5chip"><span class="rk">${i + 1}</span>${logo(x.t)} <b>${x.t}</b><span class="r5v">${fmtSwing(x.v)}</span></span>`).join("") + `</div>`;
+}
+
 /* ---- main page: one row per TEAM, sorted by win prob — pure money view.
  * A column per contest with the $ swing (EV if the team wins minus EV if it loses) plus the total,
  * deliberately NO cross-contest entry counts: a Grandissimo entry is worth ~100x a Splash 100 entry,
@@ -1240,6 +1280,7 @@ function renderContestView(c, b) {
       <div class="cev"><div class="k">Alive EV</div><div class="v ${b.evNow > 0 ? "pos" : ""}">${fmtMoney(b.evNow)}</div>
         <div class="s">live ${fmtMoney(b.evExp)}</div></div>
     </div>
+    ${R ? top5Html(R, c) : ""}
     <div class="statrow">
       <div class="stat"><span class="k">Ours alive</span>
         <span class="v">${b.M}<span class="of">/${(state.names[c] || []).length} started</span></span>
@@ -1395,8 +1436,10 @@ function setupHtml(c) {
     </div>
     <label>Import field picks — leg
       <select class="implegsel" data-c="${c}">${legOpts}</select>
-      <textarea class="impbox" data-c="${c}" rows="6" placeholder="Paste here: Circa selections PDF text, entry,pick CSV, or per-team totals (KC 4890 / Chiefs 34.4%)"></textarea>
+      <textarea class="impbox" data-c="${c}" rows="6" placeholder="Paste here: selections PDF text, entry,pick CSV, per-team totals (KC 4890 / Chiefs 34.4%), or a link to the file"></textarea>
       <div class="pairrow"><button class="btn impbtn" data-c="${c}">Import</button>
+        <button class="btn impattach" data-c="${c}">Attach file…</button>
+        <input type="file" class="impfile" data-c="${c}" accept=".pdf,.csv,.txt,text/plain,application/pdf" style="display:none">
         <span class="impstat s" id="impstat-${c}"></span></div></label>
   </div>`;
 }
@@ -1436,14 +1479,83 @@ function wireContestView(c) {
     touch();
   });
   cv.querySelectorAll("button.impbtn").forEach(b => b.onclick = () => runImport(b.dataset.c));
+  cv.querySelectorAll("button.impattach").forEach(b => b.onclick = () =>
+    cv.querySelector(`input.impfile[data-c="${b.dataset.c}"]`).click());
+  cv.querySelectorAll("input.impfile").forEach(inp => inp.onchange = async () => {
+    const f = inp.files[0]; inp.value = "";
+    if (!f) return;
+    const cc = inp.dataset.c, stat = $(`impstat-${cc}`);
+    try {
+      if (/pdf/i.test(f.type) || /\.pdf$/i.test(f.name)) {
+        stat.textContent = "reading PDF…";
+        runImport(cc, await pdfTextFromData(await f.arrayBuffer()));
+      } else {
+        runImport(cc, await f.text());
+      }
+    } catch (e) { stat.textContent = "✗ couldn't read that file (" + e.message + ")"; }
+  });
 }
 
-function runImport(c) {
+/* ---- PDF + URL import helpers ----
+ * pdf.js (lazy-loaded from cdnjs) extracts the selections PDF's text in CONTENT-STREAM ORDER — the
+ * same order the validated Python tool reads — with newlines on the viewer's line breaks, so the
+ * alternating "NAME" / "NN. NICKNAME PK" layout survives multi-column pages. */
+let pdfjsPromise = null;
+function loadPdfjs() {
+  if (!pdfjsPromise) pdfjsPromise = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      res(window.pdfjsLib);
+    };
+    s.onerror = () => { pdfjsPromise = null; rej(new Error("couldn't load the PDF reader")); };
+    document.head.appendChild(s);
+  });
+  return pdfjsPromise;
+}
+async function pdfTextFromData(buf) {
+  const lib = await loadPdfjs();
+  const doc = await lib.getDocument({ data: buf }).promise;
+  const lines = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const tc = await (await doc.getPage(p)).getTextContent();
+    let cur = "", lastY = null;
+    for (const it of tc.items) {
+      const y = it.transform ? Math.round(it.transform[5]) : lastY;
+      if (lastY != null && Math.abs(y - lastY) > 2 && cur.trim()) { lines.push(cur.trim()); cur = ""; }
+      cur += (cur ? " " : "") + it.str;
+      if (it.hasEOL && cur.trim()) { lines.push(cur.trim()); cur = ""; lastY = null; continue; }
+      lastY = y;
+    }
+    if (cur.trim()) lines.push(cur.trim());
+  }
+  return lines.join("\n");
+}
+async function runImport(c, textOpt) {
   const box = document.querySelector(`textarea.impbox[data-c="${c}"]`);
   const legSel = document.querySelector(`select.implegsel[data-c="${c}"]`);
   const stat = $(`impstat-${c}`);
-  const text = box.value.trim(), legId = legSel.value;
+  const text = String(textOpt != null ? textOpt : box.value).trim(), legId = legSel.value;
   if (!text) { stat.textContent = "nothing to import"; return; }
+
+  // a pasted LINK: try to fetch it (many sites block cross-site reads — say so honestly)
+  if (/^https?:\/\/\S+$/i.test(text)) {
+    stat.textContent = "fetching…";
+    try {
+      const res = await fetch(text);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const type = res.headers.get("content-type") || "";
+      const isPdf = /pdf/i.test(type) || /\.pdf(\?|$)/i.test(text);
+      const content = isPdf ? await pdfTextFromData(await res.arrayBuffer()) : await res.text();
+      box.value = "";
+      return runImport(c, content);
+    } catch (e) {
+      stat.textContent = "✗ that site blocks cross-site access — download the file and use Attach instead";
+      return;
+    }
+  }
 
   const rows = parseEntryRows(text, legId, c);
   let msg = null;
