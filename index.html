@@ -104,9 +104,8 @@
   .teamcell { font-weight: 600; white-space: nowrap; }
 
   #rootTable td.match { white-space: nowrap; }
-  .res { border: 1px solid var(--border); background: transparent; color: var(--ink-2); padding: 4px 10px;
-    border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 13px; font-family: inherit; }
-  .res:hover { background: var(--card-2); color: var(--ink); }
+  .res { display: inline-block; border: 1px solid var(--border); background: transparent; color: var(--ink-2);
+    padding: 4px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; font-family: inherit; }
   .res.on { background: var(--money); border-color: var(--money); color: #08130c; }
   .at { color: var(--ink-3); margin: 0 7px; font-size: 12px; }
   .rooted { font-weight: 600; white-space: nowrap; }
@@ -198,8 +197,8 @@
     <div class="panel">
       <h2>This week — what each result is worth</h2>
       <div class="sub">Expected $ swing per contest if the team wins vs loses, with every other pending game
-        weighted by its win probability · click a team to record the winner · Win % is live in-game,
-        else the market line, else the model</div>
+        weighted by its win probability · results and Win % update automatically from the live feed
+        (in-game probability, else the market line, else the model)</div>
       <div style="overflow-x:auto"><table class="games even" id="rootTable"><thead id="rootHead"></thead><tbody id="rootBody"></tbody></table></div>
     </div>
   </div>
@@ -912,7 +911,7 @@ function renderLock() {
 }
 (function lockCss() {
   const st = document.createElement("style");
-  st.textContent = "body.locked .res, body.locked select.pick, body.locked input.wpin { pointer-events: none; }" +
+  st.textContent = "body.locked select.pick { pointer-events: none; }" +
     "body.locked .setwrap, body.locked #btnImport { display: none !important; }";
   document.head.appendChild(st);
 })();
@@ -1055,10 +1054,10 @@ function renderStrip(R) {
 }
 
 /* ---- shared game-table pieces ---- */
+/* Results are sourced exclusively from the ESPN feed — the team chip is display only. */
 function resBtn(g, t, res) {
   const on = res === t;
-  return `<button class="res ${on ? "on" : ""}" data-g="${gameKey(g)}" data-t="${t}"
-    title="${on ? "click to clear" : NAMES[t] + " won"}">${logo(t)} ${t}</button>`;
+  return `<span class="res ${on ? "on" : ""}"${on ? ` title="${NAMES[t]} won"` : ""}>${logo(t)} ${t}</span>`;
 }
 function levTxt(oPct, fPct) {
   if (fPct == null) return { txt: "—", cls: "s2" };
@@ -1081,13 +1080,6 @@ function statTeam(b, c, g, t) {
     fieldPct: haveOwn ? (r && r.fieldPct != null ? r.fieldPct : 0) : null,
     alive
   };
-}
-function wireGameTable(tbody) {
-  tbody.querySelectorAll("button.res").forEach(b => b.onclick = () => {
-    const { g: k, t } = b.dataset;
-    if (state.results[k] === t) delete state.results[k]; else state.results[k] = t;
-    touch();
-  });
 }
 
 /* ---- main page: one row per TEAM, sorted by win prob — pure money view.
@@ -1140,7 +1132,6 @@ function renderRooting(R) {
     </tr>`;
   }).join("");
   $("rootBody").innerHTML = rows || `<tr><td colspan="${3 + CONTEST_KEYS.length}" class="empty">no games this week</td></tr>`;
-  wireGameTable($("rootBody"));
 }
 
 function renderContestView(c, b) {
@@ -1238,7 +1229,6 @@ function renderContestView(c, b) {
     };
     renderEntList(c, b);
   } else {
-    wireGameTable($("cGames"));
     wireContestView(c);
   }
 }
