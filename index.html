@@ -1066,7 +1066,7 @@ function renderStrip(R) {
     return `<button class="scard" data-c="${c}">
       <div class="nm">${esc(CONTESTS[c].name)}</div>
       <div class="row"><span class="ev">${fmtMoney(b.evNow)}</span>
-        <span class="al">${b.M}/${b.Min0} alive · field ${fmtN(b.F)}</span></div>
+        <span class="al">${survivedWeek(c, b)}/${b.Min0} surviving · field ${fmtN(b.F)}</span></div>
     </button>`;
   }).join("");
   $("conStrip").querySelectorAll(".scard").forEach(el => el.onclick = () => {
