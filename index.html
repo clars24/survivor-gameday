@@ -1190,7 +1190,9 @@ function top5Html(R, R0, contest) {
   };
   const row = (label, list, marks) => list.length
     ? `<div class="root5"><span class="r5label">${label}</span>` + list.map((x, i) => chip(x, i, marks)).join("") + `</div>` : "";
-  return row("Top 5 — start of day", day, true) + row("Top 5 — now", now, false);
+  const out = row("Top 5 — start of day", day, true) + row("Top 5 — now", now, false);
+  return out || `<div class="root5"><span class="r5label">Top 5 to root for</span>
+    <span class="s2">appears once entry names and this week's picks are loaded — nothing is worth money yet</span></div>`;
 }
 
 /* ---- main page: one row per TEAM, sorted by win prob — pure money view.
