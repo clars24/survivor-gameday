@@ -68,6 +68,12 @@
     border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px 5px 8px; font-weight: 600; font-size: 13px; }
   .r5chip .rk { color: var(--ink-3); font-size: 11px; font-weight: 700; }
   .r5chip .r5v { color: var(--money); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .r5chip.win { border-color: var(--money); }
+  .r5chip.lose { opacity: .55; }
+  .r5chip.lose b { text-decoration: line-through; }
+  .r5m.win { color: var(--money); font-weight: 700; }
+  .r5m.lose { color: var(--bad); font-weight: 700; }
+  .root5 + .root5 { margin-top: -6px; }
   .panel .root5 { margin: 8px 0 12px; }
   .panel .r5chip { background: var(--card-2); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 0 0 12px; }
@@ -263,18 +269,21 @@ function modelWinP(team, g) {
   return normCdf(margin / MARGIN_SD);
 }
 /* Effective win prob precedence: LIVE in-game probability (a typed pregame number is stale once the
- * game kicks off) > typed override > pregame market line > ratings model. */
+ * game kicks off) > typed override > pregame market line > ratings model.
+ * DAY_MODE recomputes the week "as of Sunday morning": this week's results and in-game probabilities
+ * are ignored, so the start-of-day rooting list is reproducible any time. */
 let live = { games: {} };   // live.games[gameKey] = { state, detail, as, hs, id, wp (home, in-game), mkt (home, pregame) }
+let DAY_MODE = false;
 function winP(team, g) {
   const k = gameKey(g);
   const lv = live.games[k];
-  if (lv && lv.state === "in" && lv.wp != null && !isNaN(lv.wp)) {
+  if (!DAY_MODE && lv && lv.state === "in" && lv.wp != null && !isNaN(lv.wp)) {
     const p = Math.max(0.01, Math.min(0.99, Number(lv.wp)));
     return team === g.home ? p : 1 - p;
   }
   const t = state.winp && state.winp[k];
   if (t != null && !isNaN(t)) { const pHome = Math.max(0.001, Math.min(0.999, t / 100)); return team === g.home ? pHome : 1 - pHome; }
-  if (lv && lv.state === "pre" && lv.mkt != null && !isNaN(lv.mkt)) {
+  if (lv && lv.mkt != null && !isNaN(lv.mkt)) {
     const p = Math.max(0.01, Math.min(0.99, Number(lv.mkt)));
     return team === g.home ? p : 1 - p;
   }
@@ -356,7 +365,11 @@ function feeOf(c)  { const o = Number(state.money.fees[c]); return o > 0 ? o : C
 /* Everything read back from the shared store is validated before use: team tokens against NAMES,
  * numbers through Number(). The store is world-writable by design, so the page must stay safe even
  * against hand-crafted junk written directly into it. */
-function resultOf(g) { const r = state.results[gameKey(g)]; return r === g.home || r === g.away || r === "TIE" ? r : null; }
+function resultOf(g) {
+  if (DAY_MODE && g.week === week) return null;   // start-of-day view: this week hasn't happened yet
+  const r = state.results[gameKey(g)];
+  return r === g.home || r === g.away || r === "TIE" ? r : null;
+}
 
 /* ============================== PARSERS ============================== */
 const POOL_NICK = {
@@ -520,7 +533,8 @@ function unpackPool(c, payload) {
 /* ============================== EV ENGINE ============================== */
 function pickTeams(v) { return (v == null ? [] : Array.isArray(v) ? v : [v]).filter(t => NAMES[t]); }
 function winnerOf(g, hyp) {
-  const w = (hyp && hyp[gameKey(g)]) || state.results[gameKey(g)] || null;
+  const recorded = DAY_MODE && g.week === week ? null : state.results[gameKey(g)];
+  const w = (hyp && hyp[gameKey(g)]) || recorded || null;
   return w === g.home || w === g.away || w === "TIE" ? w : null;   // "TIE": both sides lose (ties lose everywhere)
 }
 function gameOfTeam(leg, t) { return leg.games.find(g => g.home === t || g.away === t) || null; }
@@ -747,8 +761,8 @@ async function livePoll(force) {
         as: Number(away.score), hs: Number(home.score), id: ev.id,
         wp: prev.wp, mkt: prev.mkt
       };
-      const odds = comp.odds && comp.odds[0];
-      if (odds && odds.details && lv.state === "pre") {
+      const odds = comp.odds && comp.odds[0];   // ESPN keeps the pregame line on the feed all day
+      if (odds && odds.details) {
         const m = String(odds.details).match(/([A-Z]{2,4})\s*([+-][\d.]+)/);   // e.g. "KC -3.0"
         if (m) {
           const fav = espnAbbr(m[1]), line = Math.abs(parseFloat(m[2]));
@@ -1004,12 +1018,15 @@ function render() {
   week = autoWeek();
   $("wkBadge").textContent = weekLabel(week);
   const R = rootingGuide(week);
+  let R0;                       // the week as of Sunday morning: no results, pregame probabilities
+  DAY_MODE = true;
+  try { R0 = rootingGuide(week); } finally { DAY_MODE = false; }
   renderTabs(R);
   const showAll = tab === "all";
   $("viewAll").style.display = showAll ? "" : "none";
   $("contestView").style.display = showAll ? "none" : "";
   if (showAll) {
-    $("root5All").innerHTML = top5Html(R, null);
+    $("root5All").innerHTML = top5Html(R, R0, null);
     renderTiles(R);
     renderStrip(R);
     renderRooting(R);
@@ -1018,6 +1035,7 @@ function render() {
     const cv = $("contestView");
     const el = document.activeElement;
     renderContestView._R = R;
+    renderContestView._R0 = R0;
     if (!(cv.contains(el) && el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) renderContestView(tab, R.base[tab]);
   }
 }
@@ -1140,9 +1158,9 @@ function statTeam(b, c, g, t) {
   };
 }
 
-/** Top 5 teams to root for: biggest positive $ swing if they win. contest=null → total across all four;
- *  a contest key → that contest's swing only. Settled games drop out, so it thins as the day plays. */
-function top5Html(R, contest) {
+/** Top-5-to-root-for list from a rooting guide: biggest positive $ swing if they win.
+ *  contest=null → total across all four; a contest key → that contest's swing only. */
+function top5List(R, contest) {
   const list = [];
   for (const { g, settled, dTot, per } of R.games) {
     if (settled) continue;
@@ -1151,14 +1169,28 @@ function top5Html(R, contest) {
       let v;
       if (contest) { const p = per.find(x => x.c === contest); v = p ? p.d * sign : 0; }
       else v = dTot * sign;
-      if (v > 0.5) list.push({ t, v });
+      if (v > 0.5) list.push({ t, v, g });
     }
   }
   list.sort((a, b) => b.v - a.v);
-  const top = list.slice(0, 5);
-  if (!top.length) return "";
-  return `<div class="root5"><span class="r5label">Root for</span>` + top.map((x, i) =>
-    `<span class="r5chip"><span class="rk">${i + 1}</span>${logo(x.t)} <b>${x.t}</b><span class="r5v">${fmtSwing(x.v)}</span></span>`).join("") + `</div>`;
+  return list.slice(0, 5);
+}
+/** Two rows: the frozen start-of-day list (checked off ✓/✗ as real results land) and the live one. */
+function top5Html(R, R0, contest) {
+  const day = R0 ? top5List(R0, contest) : [];
+  const now = top5List(R, contest);
+  const chip = (x, i, marks) => {
+    let mark = "", cls = "";
+    if (marks) {
+      const res = resultOf(x.g);   // REAL results (DAY_MODE is off while rendering)
+      if (res === x.t) { mark = ` <span class="r5m win">✓</span>`; cls = " win"; }
+      else if (res) { mark = ` <span class="r5m lose">✗</span>`; cls = " lose"; }
+    }
+    return `<span class="r5chip${cls}"><span class="rk">${i + 1}</span>${logo(x.t)} <b>${x.t}</b><span class="r5v">${fmtSwing(x.v)}</span>${mark}</span>`;
+  };
+  const row = (label, list, marks) => list.length
+    ? `<div class="root5"><span class="r5label">${label}</span>` + list.map((x, i) => chip(x, i, marks)).join("") + `</div>` : "";
+  return row("Top 5 — start of day", day, true) + row("Top 5 — now", now, false);
 }
 
 /* ---- main page: one row per TEAM, sorted by win prob — pure money view.
@@ -1280,7 +1312,7 @@ function renderContestView(c, b) {
       <div class="cev"><div class="k">Alive EV</div><div class="v ${b.evNow > 0 ? "pos" : ""}">${fmtMoney(b.evNow)}</div>
         <div class="s">live ${fmtMoney(b.evExp)}</div></div>
     </div>
-    ${R ? top5Html(R, c) : ""}
+    ${R ? top5Html(R, renderContestView._R0, c) : ""}
     <div class="statrow">
       <div class="stat"><span class="k">Ours alive</span>
         <span class="v">${b.M}<span class="of">/${(state.names[c] || []).length} started</span></span>
