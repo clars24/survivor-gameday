@@ -141,6 +141,8 @@
   .statrow .s2 { display: block; margin-top: 1px; }
   table.picks { margin-top: 8px; font-size: 13px; }
   table.games { font-size: 13px; }
+  table.games.even { table-layout: fixed; width: 100%; }
+  table.games.even th:first-child, table.games.even td:first-child { width: 24%; }
   table.games td { padding-top: 5px; padding-bottom: 5px; }
   .oppn { color: var(--ink-3); font-size: 11.5px; margin-left: 6px; }
   .stW { color: var(--money); font-weight: 600; font-size: 12px; }
@@ -197,8 +199,8 @@
       <h2>This week — what each result is worth</h2>
       <div class="sub">Expected $ swing per contest if the team wins vs loses, with every other pending game
         weighted by its win probability · click a team to record the winner · Win % is live in-game,
-        else your typed number, else the market line, else the model</div>
-      <div style="overflow-x:auto"><table class="games" id="rootTable"><thead id="rootHead"></thead><tbody id="rootBody"></tbody></table></div>
+        else the market line, else the model</div>
+      <div style="overflow-x:auto"><table class="games even" id="rootTable"><thead id="rootHead"></thead><tbody id="rootBody"></tbody></table></div>
     </div>
   </div>
 
@@ -1086,13 +1088,6 @@ function wireGameTable(tbody) {
     if (state.results[k] === t) delete state.results[k]; else state.results[k] = t;
     touch();
   });
-  tbody.querySelectorAll("input.wpin").forEach(inp => inp.onchange = () => {
-    const v = parseFloat(inp.value);
-    const away = inp.dataset.side === "away";   // stored as the HOME team's %
-    if (isNaN(v) || v <= 0 || v >= 100) delete state.winp[inp.dataset.g];
-    else state.winp[inp.dataset.g] = away ? 100 - v : v;
-    touch();
-  });
 }
 
 /* ---- main page: one row per TEAM, sorted by win prob — pure money view.
@@ -1131,14 +1126,7 @@ function renderRooting(R) {
     : `<span class="${v >= 0 ? "pos" : "neg"}">${fmtSwing(v)}</span>`;
   const rows = shown.map(r => {
     const lost = r.res && r.res !== r.t;
-    const wpVal = Number(state.winp[r.k]);
-    const wpTyped = state.winp[r.k] != null && !isNaN(wpVal);
-    const shownPct = Math.round(r.wp * 100);
-    const winCell = r.settled
-      ? `${shownPct}%`
-      : `<input class="cell wpin ${wpTyped ? "edited" : ""}" data-g="${r.k}" data-side="${r.t === r.g.home ? "home" : "away"}"
-           value="${wpTyped ? (r.t === r.g.home ? wpVal : 100 - wpVal) : ""}" placeholder="${shownPct}"
-           title="${r.t} win % — type to override the model">`;
+    const winCell = `${Math.round(r.wp * 100)}%`;
     const perCells = CONTEST_KEYS.map(c =>
       `<td class="num">${r.settled ? `<span class="s2">—</span>` : money(r.perT[c])}</td>`).join("");
     const totCell = r.settled
@@ -1230,7 +1218,7 @@ function renderContestView(c, b) {
       </div>
       <div style="overflow-x:auto" id="entList"></div>`
     : `
-      <div style="overflow-x:auto"><table class="games"><thead>
+      <div style="overflow-x:auto"><table class="games even"><thead>
         <tr><th>Team</th><th class="num">Win %</th><th class="num">Ours</th><th class="num">Ours %</th><th class="num">Field</th><th class="num">Field %</th><th class="num">Lev</th></tr>
       </thead><tbody id="cGames">${gameRows}</tbody></table></div>
       <details data-id="picks-${c}"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
