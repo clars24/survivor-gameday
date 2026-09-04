@@ -1025,12 +1025,12 @@ function renderTiles(R) {
     if (!b.exact) anyEst = true;
   }
   $("tiles").innerHTML = `
-    <div class="tile"><div class="k">Live EV</div>
+    <div class="tile"><div class="k">Alive EV</div>
       <div class="v money">${fmtMoney(evNow)}</div>
-      <div class="s">settled games${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
-    <div class="tile"><div class="k">Expected</div>
+      <div class="s">final games only${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
+    <div class="tile"><div class="k">Live EV</div>
       <div class="v">${fmtMoney(evExp)}</div>
-      <div class="s">at week end</div></div>
+      <div class="s">weighted by live win probabilities</div></div>
     <div class="tile"><div class="k">Entries alive</div>
       <div class="v">${mine}<span style="color:var(--ink-3)">/${mine0}</span></div>
       <div class="s">all contests</div></div>
@@ -1182,8 +1182,8 @@ function renderContestView(c, b) {
     <div class="chead">
       <div><h2>${esc(C.name)}</h2>
         <div class="meta">${legLabels} · pot ${fmtMoney(b.pot)} <span class="s2">(${potNote})</span></div></div>
-      <div class="cev"><div class="k">EV now</div><div class="v ${b.evNow > 0 ? "pos" : ""}">${fmtMoney(b.evNow)}</div>
-        <div class="s">expected ${fmtMoney(b.evExp)}</div></div>
+      <div class="cev"><div class="k">Alive EV</div><div class="v ${b.evNow > 0 ? "pos" : ""}">${fmtMoney(b.evNow)}</div>
+        <div class="s">live ${fmtMoney(b.evExp)}</div></div>
     </div>
     <div class="statrow">
       <div class="stat"><span class="k">Ours alive</span>
