@@ -159,6 +159,18 @@
   table.games.even th:first-child, table.games.even td:first-child { width: 24%; }
   table.games td { padding-top: 5px; padding-bottom: 5px; }
   .oppn { color: var(--ink-3); font-size: 11.5px; margin-left: 6px; }
+  .lscore { color: var(--ink-3); font-size: 11.5px; margin-left: 6px; white-space: nowrap; }
+  .th-sm { display: none; }
+  @media (max-width: 640px) {
+    .oppn { display: none; }
+    .th-full { display: none; }
+    .th-sm { display: inline; }
+    table.games { font-size: 12px; }
+    table.games th, table.games td { padding-left: 4px; padding-right: 4px; }
+    table.games.even th:first-child, table.games.even td:first-child { width: 21%; }
+    .res { padding: 3px 6px; font-size: 12px; }
+    .tlogo { width: 15px; height: 15px; }
+  }
   .stW { color: var(--money); font-weight: 600; font-size: 12px; }
   .stL { color: var(--bad); font-weight: 600; font-size: 12px; }
   .stP { color: var(--ink-3); font-size: 12px; }
@@ -325,13 +337,13 @@ function buildLegs(style, doubles) {
   return legs;
 }
 const CONTESTS = {
-  circa:     { name: "Circa Survivor",              short: "Circa",      fee: 1000,
+  circa:     { name: "Circa Survivor",              short: "Circa",      abbr: "CIR",  fee: 1000,
                defaultN: 18000, potFixed: null,     legs: buildLegs("circa") },
-  grand:     { name: "Grandissimo",                 short: "Grand",      fee: 100000,
+  grand:     { name: "Grandissimo",                 short: "Grand",      abbr: "GRD",  fee: 100000,
                defaultN: 60,    potFixed: null,     legs: buildLegs("circa") },
-  splash1k:  { name: "Survivor World Championship", short: "Splash 1K",  fee: 1000,
+  splash1k:  { name: "Survivor World Championship", short: "Splash 1K",  abbr: "S1K",  fee: 1000,
                defaultN: 22700, potFixed: 21000000, legs: buildLegs("splash", [9,12,13,14,15,16]) },
-  splash100: { name: "The Big Splash",              short: "Splash 100", fee: 100,
+  splash100: { name: "The Big Splash",              short: "Splash 100", abbr: "S100", fee: 100,
                defaultN: 33334, potFixed: 3000000,  legs: buildLegs("splash", [3,6,9,12,13,14,15,16]) }
 };
 const CONTEST_KEYS = Object.keys(CONTESTS);
@@ -795,7 +807,7 @@ async function livePoll(force) {
 function liveTag(g) {
   const lv = live.games[gameKey(g)];
   if (!lv || lv.state === "pre" || isNaN(lv.as) || isNaN(lv.hs)) return "";
-  return `<span class="oppn">${lv.as}–${lv.hs}${lv.detail ? " · " + esc(lv.detail) : ""}</span>`;
+  return `<span class="lscore">${lv.as}–${lv.hs}${lv.detail ? " · " + esc(lv.detail) : ""}</span>`;
 }
 
 /* ============================== SHARED-STATE GLUE (public site: Firebase RTDB) ==============================
@@ -929,19 +941,29 @@ function openStream() {
   glue.es.onerror = () => setChip("off", "reconnecting…");
   glue.es.onopen = () => { if (glue.on) setChip("live", "live · shared"); };
 }
+/* Editing is unlocked ONLY by opening the site once with the secret key link
+ * (…/#key=<passphrase>); the page stores the grant per device and strips the key from the
+ * address bar. Viewers of the plain link get a clean read-only board with no way in. The page
+ * carries only the SHA-256 of the passphrase, and this is accident-prevention for a
+ * world-writable store, not cryptographic security. */
+const EDIT_KEY_HASH = "4611ffe06fb751f2bdbba17d378b7fa4b63ce49ead1c633c15dd30e4c535d4c5";
 function renderLock() {
   document.body.classList.toggle("locked", !glue.editor);
-  const banner = document.getElementById("roBanner");
-  if (!glue.editor) {
-    banner.style.display = "";
-    banner.innerHTML = 'Spectator mode — you are watching the live board. ' +
-      '<button class="btn" id="btnEdit" style="margin-left:8px">Enable editing</button>';
-    banner.querySelector("#btnEdit").onclick = () => {
+  document.getElementById("roBanner").style.display = "none";
+}
+async function checkEditKey() {
+  const m = location.hash.match(/^#key=(.+)$/) || location.search.match(/[?&]key=([^&]+)/);
+  if (!m) return;
+  try {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(decodeURIComponent(m[1])));
+    const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+    if (hex === EDIT_KEY_HASH) {
       glue.editor = true;
       try { localStorage.setItem("gamedayEditor", "1"); } catch (e) {}
-      renderLock();
-    };
-  } else banner.style.display = "none";
+    }
+  } catch (e) {}
+  history.replaceState(null, "", location.pathname);
+  renderLock();
 }
 (function lockCss() {
   const st = document.createElement("style");
@@ -949,7 +971,9 @@ function renderLock() {
     "body.locked .setwrap, body.locked #btnImport { display: none !important; }";
   document.head.appendChild(st);
 })();
+window.addEventListener("hashchange", checkEditKey);
 async function connectShared() {
+  await checkEditKey();
   renderLock();
   setChip("conn", "connecting…");
   try {
@@ -1200,10 +1224,11 @@ function top5Html(R, R0, contest) {
  * deliberately NO cross-contest entry counts: a Grandissimo entry is worth ~100x a Splash 100 entry,
  * so mixed counts and percentages mislead. Counts live on each contest's own tab. ---- */
 function renderRooting(R) {
+  const th2 = (full, sm) => `<span class="th-full">${full}</span><span class="th-sm">${sm}</span>`;
   $("rootHead").innerHTML = `<tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
-    <th class="num sortable" data-k="wp">Win %${sortArrow(mainSort, "wp")}</th>
-    ${CONTEST_KEYS.map(c => `<th class="num sortable" data-k="${c}">${esc(CONTESTS[c].short)}${sortArrow(mainSort, c)}</th>`).join("")}
-    <th class="num sortable" data-k="total">Total${sortArrow(mainSort, "total")}</th></tr>`;
+    <th class="num sortable" data-k="wp">${th2("Win %", "Win")}${sortArrow(mainSort, "wp")}</th>
+    ${CONTEST_KEYS.map(c => `<th class="num sortable" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
+    <th class="num sortable" data-k="total">${th2("Total", "Tot")}${sortArrow(mainSort, "total")}</th></tr>`;
   const teamRows = [];
   let anyData = false;
   for (const { g, k, settled, dTot, per } of R.games) {
@@ -1341,11 +1366,11 @@ function renderContestView(c, b) {
     : `
       <div style="overflow-x:auto"><table class="games even"><thead id="cHead">
         <tr><th class="sortable" data-k="team">Team${sortArrow(boardSort, "team")}</th>
-        <th class="num sortable" data-k="wp">Win %${sortArrow(boardSort, "wp")}</th>
+        <th class="num sortable" data-k="wp"><span class="th-full">Win %</span><span class="th-sm">Win</span>${sortArrow(boardSort, "wp")}</th>
         <th class="num sortable" data-k="ours">Ours${sortArrow(boardSort, "ours")}</th>
-        <th class="num sortable" data-k="ourspct">Ours %${sortArrow(boardSort, "ourspct")}</th>
+        <th class="num sortable" data-k="ourspct"><span class="th-full">Ours %</span><span class="th-sm">O%</span>${sortArrow(boardSort, "ourspct")}</th>
         <th class="num sortable" data-k="field">Field${sortArrow(boardSort, "field")}</th>
-        <th class="num sortable" data-k="fieldpct">Field %${sortArrow(boardSort, "fieldpct")}</th>
+        <th class="num sortable" data-k="fieldpct"><span class="th-full">Field %</span><span class="th-sm">F%</span>${sortArrow(boardSort, "fieldpct")}</th>
         <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th></tr>
       </thead><tbody id="cGames">${gameRows}</tbody></table></div>
       <details data-id="picks-${c}"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
