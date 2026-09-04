@@ -1017,11 +1017,32 @@ function renderTabs(R) {
   }
 }
 
+/** Entries that have fully SURVIVED the week: every one of this week's picks is final and won. */
+function survivedWeek(c, b) {
+  const legs = b.legs;
+  const names = (state.names[c] || []).filter(n => myEntryAliveUpTo(c, n, legIndex(c, legs[0].id), null));
+  let s = 0;
+  for (const n of names) {
+    let ok = true;
+    for (const leg of legs) {
+      const ps = pickTeams((state.mine[c][n] || {})[leg.id]);
+      if (ps.length < leg.picks) { ok = false; break; }
+      for (const t of ps) {
+        const g = gameOfTeam(leg, t);
+        if (!g || winnerOf(g, null) !== t) { ok = false; break; }
+      }
+      if (!ok) break;
+    }
+    if (ok) s++;
+  }
+  return s;
+}
+
 function renderTiles(R) {
-  let evNow = 0, evExp = 0, pots = 0, mine = 0, mine0 = 0, anyEst = false;
+  let evNow = 0, evExp = 0, pots = 0, surv = 0, mine0 = 0, anyEst = false;
   for (const c of CONTEST_KEYS) {
     const b = R.base[c]; if (!b) continue;
-    evNow += b.evNow; evExp += b.evExp; pots += b.pot; mine += b.M; mine0 += b.Min0;
+    evNow += b.evNow; evExp += b.evExp; pots += b.pot; surv += survivedWeek(c, b); mine0 += b.Min0;
     if (!b.exact) anyEst = true;
   }
   $("tiles").innerHTML = `
@@ -1031,9 +1052,9 @@ function renderTiles(R) {
     <div class="tile"><div class="k">Live EV</div>
       <div class="v">${fmtMoney(evExp)}</div>
       <div class="s">weighted by live win probabilities</div></div>
-    <div class="tile"><div class="k">Entries alive</div>
-      <div class="v">${mine}<span style="color:var(--ink-3)">/${mine0}</span></div>
-      <div class="s">all contests</div></div>
+    <div class="tile"><div class="k">Surviving the week</div>
+      <div class="v">${surv}<span style="color:var(--ink-3)">/${mine0}</span></div>
+      <div class="s">picks that have won · all contests</div></div>
     <div class="tile"><div class="k">Total pots</div>
       <div class="v">${fmtMoney(pots)}</div>
       <div class="s">four contests</div></div>`;
