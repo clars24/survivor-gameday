@@ -455,18 +455,33 @@ function myNameSet(c) {
   for (const n of (state.names[c] || [])) s.set(String(n).trim().toUpperCase(), String(n).trim());
   return s;
 }
+/* Circa names entries in blocks ("C3 Picks-1" … "-10"). A typed base name matches every entry of its
+ * block, case-insensitively, so nobody has to type ten suffixed names. */
+const baseName = n => String(n).trim().toUpperCase().replace(/-\d+$/, "");
+function myMatcher(c) {
+  const exact = myNameSet(c);
+  const base = new Map();
+  for (const [u, typed] of exact) base.set(baseName(u), typed);
+  return name => {
+    const u = String(name).trim().toUpperCase();
+    return exact.get(u) || base.get(baseName(u)) || null;
+  };
+}
 function ingestEntryRows(c, rows) {
-  const mineSet = myNameSet(c);
+  const match = myMatcher(c);
   const byLeg = {};
-  const matched = new Set();
+  const matched = new Set();        // which TYPED names hit
+  const oursFull = new Set();       // full roster names of our entries (block expansion)
   for (const r of rows) {
     const L = byLeg[r.leg] || (byLeg[r.leg] = { own: {}, entries: new Map() });
     L.own[r.pick] = (L.own[r.pick] || 0) + 1;
     L.entries.set(r.entry, (L.entries.get(r.entry) || 0) + 1);
-    const mineName = mineSet.get(String(r.entry).trim().toUpperCase());
-    if (mineName) {
-      matched.add(mineName);
-      const M = state.mine[c][mineName] || (state.mine[c][mineName] = {});
+    const typed = match(r.entry);
+    if (typed) {
+      matched.add(typed);
+      const full = String(r.entry).trim();   // record under the roster's own name, suffix and all
+      oursFull.add(full);
+      const M = state.mine[c][full] || (state.mine[c][full] = {});
       const width = (legById(c, r.leg) || { picks: 1 }).picks;
       const cur = M[r.leg];
       if (cur == null || width < 2) M[r.leg] = r.pick;         // single-pick leg: a re-import REPLACES
@@ -474,15 +489,21 @@ function ingestEntryRows(c, rows) {
       else if (cur !== r.pick) M[r.leg] = [cur, r.pick];
     }
   }
+  // expand typed base names into the full block roster: keep typed names that matched nothing
+  // (they may match a later import), swap matched ones for the discovered full names
+  if (oursFull.size) {
+    const keep = (state.names[c] || []).filter(n => !matched.has(String(n).trim()) || oursFull.has(String(n).trim()));
+    state.names[c] = [...new Set([...keep, ...oursFull])];
+  }
   const legs = [];
   for (const legId in byLeg) {
     const L = byLeg[legId];
     state.field[c][legId] = { own: L.own, alive: L.entries.size, src: "entries", at: 0 };
     legs.push(legId + " (" + L.entries.size + " entries)");
   }
-  const unmatched = [...mineSet.values()].filter(n => !matched.has(n));
+  const unmatched = [...myNameSet(c).values()].filter(n => !matched.has(n) && !oursFull.has(n));
   poolIngest(c, rows);
-  return { legs, matched: [...matched], unmatched, total: rows.length };
+  return { legs, matched: [...matched], unmatched, total: rows.length, expanded: oursFull.size };
 }
 
 /* ---- entry-level pool: every entry's selections, kept for the Entries view ----
@@ -829,6 +850,15 @@ function lsLoad() {
   } catch (e) {}
 }
 function queueSave() { lsSave(); }   // the 2.5s diff loop does the pushing
+/* STABLE stringify (sorted keys) for every sync comparison. Firebase returns keys in its own order,
+ * so naive JSON.stringify comparisons see phantom differences on every echo of your own push —
+ * which caused an endless re-render/push loop (the page "flashing"). */
+function sj(v) {
+  if (v === undefined || v === null) return "null";
+  if (typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(sj).join(",") + "]";
+  return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + sj(v[k])).join(",") + "}";
+}
 function setChip(mode, msg) {
   const chip = document.getElementById("shareChip");
   chip.textContent = msg;
@@ -858,22 +888,23 @@ function applyRemote(obj) {
     let lastObj = null;
     try { lastObj = glue.last ? JSON.parse(glue.last) : null; } catch (e) {}
     const present = v => v !== undefined && v !== null;
+    let changedReal = false;
     for (const k of SYNC_KEYS) {
       const remoteHas = present(obj[k]);
       const lastHad = lastObj != null && present(lastObj[k]);
       if (!remoteHas && !lastHad) continue;
-      const localDirty = lastObj && k !== "_sync" &&
-        JSON.stringify(state[k] === undefined ? null : state[k]) !== JSON.stringify(lastObj[k] === undefined ? null : lastObj[k]);
+      const localDirty = lastObj && k !== "_sync" && sj(state[k]) !== sj(lastObj[k]);
       if (localDirty) continue;
+      if (k !== "_sync" && sj(state[k]) !== sj(obj[k])) changedReal = true;
       if (remoteHas) state[k] = obj[k];
       else delete state[k];
     }
     normalizeState();
     const rs = {};
     for (const k of SYNC_KEYS) if (present(obj[k])) rs[k] = obj[k];
-    glue.last = JSON.stringify(rs);
+    glue.last = sj(rs);
     lsSave();
-    render();
+    if (changedReal) render();   // a heartbeat-only echo repaints nothing
     setChip("live", "live · shared");
   })();
 }
@@ -882,8 +913,7 @@ function syncDiff(cur, last) {
   const isObj = v => v && typeof v === "object" && !Array.isArray(v);
   function walk(path, x, y, depth) {
     if (depth <= 1 || !isObj(x) || !isObj(y)) {
-      if (JSON.stringify(x === undefined ? null : x) !== JSON.stringify(y === undefined ? null : y))
-        patch[path] = x === undefined ? null : x;
+      if (sj(x) !== sj(y)) patch[path] = x === undefined ? null : x;
       return;
     }
     const keys = new Set([...Object.keys(x), ...Object.keys(y)]);
@@ -913,7 +943,7 @@ async function syncPush() {
         }
         if (patch[p] === null) delete cur[parts[parts.length - 1]]; else cur[parts[parts.length - 1]] = patch[p];
       }
-      glue.last = JSON.stringify(sharedSnapshotOf(merged));
+      glue.last = sj(sharedSnapshotOf(merged));
       setChip("live", "live · saved");
     }
   } catch (err) {
@@ -932,7 +962,7 @@ function openStream() {
         const res = await fetch(SYNC_URL + "/state.json");
         if (!res.ok) return;
         const data = await res.json();
-        if (data && JSON.stringify(sharedSnapshotOf(data)) !== glue.last) applyRemote(data);
+        if (data && sj(sharedSnapshotOf(data)) !== glue.last) applyRemote(data);
       } catch (e) {}
     }, 400);
   };
@@ -986,7 +1016,7 @@ async function connectShared() {
     openStream();
     if (!glue.timer) glue.timer = setInterval(() => {
       if (!glue.on || glue.pushing || glue.pendingRemote) return;
-      if (JSON.stringify(sharedSnapshot()) !== glue.last) syncPush();
+      if (sj(sharedSnapshot()) !== glue.last) syncPush();
     }, 2500);
     setChip("live", "live · shared");
   } catch (err) {
@@ -1285,6 +1315,9 @@ function renderContestView(c, b) {
   const C = CONTESTS[c];
   const cv = $("contestView");
   if (!b) { cv.innerHTML = ""; return; }
+  // pasted-but-not-yet-imported text survives re-renders (it lives only in the DOM)
+  const keepPaste = {};
+  cv.querySelectorAll("textarea.impbox").forEach(t => { if (t.value) keepPaste[t.dataset.c] = t.value; });
   const legLabels = b.legs.map(l => l.label + (l.picks > 1 ? " ×2" : "")).join(" + ");
   const potNote = Number(state.money.pots[c]) > 0 ? "typed" : C.potFixed ? "guaranteed" : `${fmtMoney(feeOf(c))} × ${fmtN(startN(c))}`;
   const est = b.exact ? "" : ` <span class="warn2" title="No field import for ${b.missingField.join(", ") || "an earlier leg"} — field size is carried forward / defaulted">≈</span>`;
@@ -1377,6 +1410,7 @@ function renderContestView(c, b) {
       <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>`}
   </div>`;
   trackDetails(cv);
+  cv.querySelectorAll("textarea.impbox").forEach(t => { if (keepPaste[t.dataset.c]) t.value = keepPaste[t.dataset.c]; });
   cv.querySelectorAll(".subtabs button").forEach(btn => btn.onclick = () => {
     subTab = btn.dataset.s; render();
   });
@@ -1408,11 +1442,11 @@ function renderEntList(c, b) {
     return;
   }
   const legs = b.legs;
-  const mineSet = myNameSet(c);
+  const match = myMatcher(c);
   let rows = P.names.map((n, i) => ({
     n, i,
     picks: legs.map(l => pickTeams((P.legs[l.id] || [])[i])),
-    mine: mineSet.has(String(n).trim().toUpperCase())
+    mine: !!match(n)
   }));
   if (entMine) rows = rows.filter(r => r.mine);
   const q = entQuery.trim().toUpperCase();
@@ -1499,6 +1533,7 @@ function setupHtml(c) {
       <div class="pairrow"><button class="btn impbtn" data-c="${c}">Import</button>
         <button class="btn impattach" data-c="${c}">Attach file…</button>
         <input type="file" class="impfile" data-c="${c}" accept=".pdf,.csv,.txt,text/plain,application/pdf" style="display:none">
+        <button class="btn setsave" data-c="${c}">Save setup</button>
         <span class="impstat s" id="impstat-${c}"></span></div></label>
   </div>`;
 }
@@ -1518,24 +1553,39 @@ function wireContestView(c) {
     }
     touch();
   });
-  cv.querySelectorAll("textarea.nms").forEach(t => t.onchange = () => {
-    state.names[t.dataset.c] = t.value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-    touch();
+  // every keystroke commits to state immediately (and localStorage), so a re-render, a sync pull, or a
+  // closed tab can never lose typed setup again; blur additionally queues the shared save
+  const commitNms = t => { state.names[t.dataset.c] = t.value.split(/\r?\n/).map(x => x.trim()).filter(Boolean); lsSave(); };
+  cv.querySelectorAll("textarea.nms").forEach(t => {
+    t.oninput = () => commitNms(t);
+    t.onchange = () => { commitNms(t); touch(); };
   });
-  cv.querySelectorAll("input.szin").forEach(i => i.onchange = () => {
-    const v = parseInt(i.value.replace(/[,$]/g, ""), 10);
-    if (v > 0) state.sizes[i.dataset.c] = v; else delete state.sizes[i.dataset.c];
-    touch();
-  });
-  cv.querySelectorAll("input.potin").forEach(i => i.onchange = () => {
+  const numCommit = (i, write) => {
     const v = parseFloat(i.value.replace(/[,$]/g, ""));
-    if (v > 0) state.money.pots[i.dataset.c] = v; else delete state.money.pots[i.dataset.c];
-    touch();
+    write(v > 0 ? v : null); lsSave();
+  };
+  cv.querySelectorAll("input.szin").forEach(i => {
+    const w = v => { if (v) state.sizes[i.dataset.c] = Math.round(v); else delete state.sizes[i.dataset.c]; };
+    i.oninput = () => numCommit(i, w);
+    i.onchange = () => { numCommit(i, w); touch(); };
   });
-  cv.querySelectorAll("input.feein").forEach(i => i.onchange = () => {
-    const v = parseFloat(i.value.replace(/[,$]/g, ""));
-    if (v > 0) state.money.fees[i.dataset.c] = v; else delete state.money.fees[i.dataset.c];
+  cv.querySelectorAll("input.potin").forEach(i => {
+    const w = v => { if (v) state.money.pots[i.dataset.c] = v; else delete state.money.pots[i.dataset.c]; };
+    i.oninput = () => numCommit(i, w);
+    i.onchange = () => { numCommit(i, w); touch(); };
+  });
+  cv.querySelectorAll("input.feein").forEach(i => {
+    const w = v => { if (v) state.money.fees[i.dataset.c] = v; else delete state.money.fees[i.dataset.c]; };
+    i.oninput = () => numCommit(i, w);
+    i.onchange = () => { numCommit(i, w); touch(); };
+  });
+  cv.querySelectorAll("button.setsave").forEach(b => b.onclick = () => {
+    const cc = b.dataset.c;
+    const t = cv.querySelector(`textarea.nms[data-c="${cc}"]`);
+    if (t) commitNms(t);
     touch();
+    const st = $(`impstat-${cc}`);
+    if (st) st.textContent = `✓ saved ${(state.names[cc] || []).length} entry names · ${new Date().toLocaleTimeString()}`;
   });
   cv.querySelectorAll("button.impbtn").forEach(b => b.onclick = () => runImport(b.dataset.c));
   cv.querySelectorAll("button.impattach").forEach(b => b.onclick = () =>
