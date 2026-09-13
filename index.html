@@ -858,8 +858,13 @@ function queueSave() { lsSave(); }   // the 2.5s diff loop does the pushing
 function sj(v) {
   if (v === undefined || v === null) return "null";
   if (typeof v !== "object") return JSON.stringify(v);
-  if (Array.isArray(v)) return "[" + v.map(sj).join(",") + "]";
-  return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + sj(v[k])).join(",") + "}";
+  if (Array.isArray(v)) return v.length ? "[" + v.map(sj).join(",") + "]" : "null";
+  const parts = [];
+  for (const k of Object.keys(v).sort()) {
+    const s = sj(v[k]);
+    if (s !== "null") parts.push(JSON.stringify(k) + ":" + s);   // empty == absent, Firebase's own semantics
+  }
+  return parts.length ? "{" + parts.join(",") + "}" : "null";
 }
 function setChip(mode, msg) {
   const chip = document.getElementById("shareChip");
