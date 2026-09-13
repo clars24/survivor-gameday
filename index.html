@@ -24,6 +24,7 @@
     --bad: #e0604e;
     --warn: #d9a521;
     --gold: #e6b93f;
+    --bad-soft: #e0604e1a;
   }
   .gold { color: var(--gold); font-weight: 600; }
   * { box-sizing: border-box; }
@@ -113,9 +114,11 @@
   th.num, td.num { text-align: right; }
   td { padding: 7px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
   tbody tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #ffffff06; }
   tr.settled td { opacity: .45; }
   tr.dead td { opacity: .4; }
+  tr.won td { background: var(--money-soft); }
+  tr.lost td { background: var(--bad-soft); opacity: .8; }
+  tr:hover td { background: #ffffff09; }
   td.empty { color: var(--ink-3); text-align: center; }
   .tlogo { width: 18px; height: 18px; object-fit: contain; vertical-align: -4px; }
   .teamcell { font-weight: 600; white-space: nowrap; }
@@ -1309,7 +1312,7 @@ function renderRooting(R) {
     const totCell = r.settled
       ? `<span class="s2">${r.res === r.t ? "✓ won" : "✗ lost"}</span>`
       : money(r.swing);
-    return `<tr class="${r.settled ? "settled" : ""} ${lost ? "dead" : ""}">
+    return `<tr class="${r.res ? (lost ? "lost" : "won") : ""}">
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}</span>${liveTag(r.g)}</td>
       <td class="num wp">${winCell}</td>
       ${perCells}
@@ -1363,7 +1366,7 @@ function renderContestView(c, b) {
     const lev = levTxt(r.s.minePct, r.s.fieldPct);
     const lost = r.res && r.res !== r.t;
     const status = r.res ? (r.res === r.t ? ` <span class="stW">✓</span>` : ` <span class="stL">✗</span>`) : "";
-    return `<tr class="${r.settled ? "settled" : ""} ${lost ? "dead" : ""}">
+    return `<tr class="${r.res ? (lost ? "lost" : "won") : ""}">
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${liveTag(r.g)}${status}</td>
       <td class="num s">${r.res ? (r.res === r.t ? "100%" : "0%") : Math.round(r.wp * 100) + "%"}</td>
       <td class="num gold">${r.s.mine || ""}</td>
