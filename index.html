@@ -23,7 +23,9 @@
     --money-soft: #35c77c1a;
     --bad: #e0604e;
     --warn: #d9a521;
+    --gold: #e6b93f;
   }
+  .gold { color: var(--gold); font-weight: 600; }
   * { box-sizing: border-box; }
   html { background: var(--ground); }
   body { margin: 0; background: var(--ground); color: var(--ink);
@@ -1175,7 +1177,7 @@ function renderStrip(R) {
 }
 
 /* ---- shared game-table pieces ---- */
-let mainSort = { key: "wp", dir: -1 }, boardSort = { key: "wp", dir: -1 };
+let mainSort = { key: "wp", dir: -1 }, boardSort = { key: "ours", dir: -1 };
 function sortArrow(s, k) { return s.key === k ? (s.dir > 0 ? " ▲" : " ▼") : ""; }
 /** Numeric compare with nulls always last, whatever the direction. */
 function cmpNum(a, b, dir) {
@@ -1301,7 +1303,7 @@ function renderRooting(R) {
     : `<span class="${v >= 0 ? "pos" : "neg"}">${fmtSwing(v)}</span>`;
   const rows = shown.map(r => {
     const lost = r.res && r.res !== r.t;
-    const winCell = `${Math.round(r.wp * 100)}%`;
+    const winCell = r.res ? (r.res === r.t ? "100%" : "0%") : `${Math.round(r.wp * 100)}%`;
     const perCells = CONTEST_KEYS.map(c =>
       `<td class="num">${r.settled ? `<span class="s2">—</span>` : money(r.perT[c])}</td>`).join("");
     const totCell = r.settled
@@ -1363,8 +1365,8 @@ function renderContestView(c, b) {
     const status = r.res ? (r.res === r.t ? ` <span class="stW">✓</span>` : ` <span class="stL">✗</span>`) : "";
     return `<tr class="${r.settled ? "settled" : ""} ${lost ? "dead" : ""}">
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${liveTag(r.g)}${status}</td>
-      <td class="num s">${Math.round(r.wp * 100)}%</td>
-      <td class="num">${r.s.mine || ""}</td>
+      <td class="num s">${r.res ? (r.res === r.t ? "100%" : "0%") : Math.round(r.wp * 100) + "%"}</td>
+      <td class="num gold">${r.s.mine || ""}</td>
       <td class="num s">${r.s.mine ? r.s.minePct.toFixed(1) + "%" : ""}</td>
       <td class="num">${r.s.fieldCnt == null ? "—" : fmtN(r.s.fieldCnt)}</td>
       <td class="num s">${r.s.fieldPct == null ? "—" : r.s.fieldPct.toFixed(1) + "%"}</td>
