@@ -1389,7 +1389,7 @@ function renderContestView(c, b) {
       <td class="num s">${r.res ? (r.res === r.t ? "100%" : "0%") : Math.round(r.wp * 100) + "%"}</td>
       <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : "gold"}">${r.s.mine || ""}</td>
       <td class="num s">${r.s.mine ? r.s.minePct.toFixed(1) + "%" : ""}</td>
-      <td class="num">${r.s.fieldCnt == null ? "—" : fmtN(r.s.fieldCnt)}</td>
+      <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : ""}">${r.s.fieldCnt == null ? "—" : fmtN(r.s.fieldCnt)}</td>
       <td class="num s">${r.s.fieldPct == null ? "—" : r.s.fieldPct.toFixed(1) + "%"}</td>
       <td class="num ${lev.cls}">${lev.txt}</td>
     </tr>`;
