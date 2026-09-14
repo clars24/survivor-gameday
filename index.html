@@ -88,7 +88,7 @@
   .root5.r5now + .root5 { margin-top: 0; }
   .panel .root5 { margin: 8px 0 12px; }
   .panel .r5chip { background: var(--card-2); }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 0 0 12px; }
+  .tiles { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin: 0 0 12px; }
   .tile { background: var(--card); border-radius: 14px; padding: 13px 16px 11px; }
   .tile .k { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); font-weight: 600; }
   .tile .v { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-weight: 700; font-size: 33px;
@@ -215,6 +215,7 @@
     .res { padding: 3px 6px; font-size: 12px; }
     .tlogo { width: 15px; height: 15px; }
     .root5 { flex-wrap: nowrap; overflow-x: auto; }
+    .tiles { grid-template-columns: 1fr; }
     .brand { font-size: 25px; }
     .cev .v { font-size: 27px; }
     .chead { gap: 16px; }
