@@ -120,6 +120,11 @@
   tr.dead td { opacity: .4; }
   tr.won td { background: var(--money-soft); }
   tr.lost td { background: var(--bad-soft); opacity: .8; }
+  tr.livegame td { background: var(--act-soft); }
+  .ldot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--act);
+    margin-right: 5px; vertical-align: 1px; animation: lpulse 1.6s ease-in-out infinite; }
+  @keyframes lpulse { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .ldot { animation: none; } }
   tr:hover td { background: #ffffff09; }
   td.empty { color: var(--ink-3); text-align: center; }
   .tlogo { width: 18px; height: 18px; object-fit: contain; vertical-align: -4px; }
@@ -904,7 +909,12 @@ async function livePoll(force) {
 function liveTag(g) {
   const lv = live.games[gameKey(g)];
   if (!lv || lv.state === "pre" || isNaN(lv.as) || isNaN(lv.hs)) return "";
-  return `<span class="lscore">${lv.as}–${lv.hs}${lv.detail ? " · " + esc(lv.detail) : ""}</span>`;
+  const dot = lv.state === "in" ? `<span class="ldot"></span>` : "";
+  return `<span class="lscore">${dot}${lv.as}–${lv.hs}${lv.detail ? " · " + esc(lv.detail) : ""}</span>`;
+}
+function isLiveGame(g) {
+  const lv = live.games[gameKey(g)];
+  return !!(lv && lv.state === "in");
 }
 
 /* ============================== SHARED-STATE GLUE (public site: Firebase RTDB) ==============================
@@ -1392,7 +1402,7 @@ function renderRooting(R) {
     const totCell = r.settled
       ? `<span class="s2">${r.res === r.t ? "✓ won" : "✗ lost"}</span>`
       : money(r.swing);
-    return `<tr class="${r.res ? (lost ? "lost" : "won") : ""}">
+    return `<tr class="${r.res ? (lost ? "lost" : "won") : isLiveGame(r.g) ? "livegame" : ""}">
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}</span>${liveTag(r.g)}</td>
       <td class="num wp">${winCell}</td>
       ${perCells}
@@ -1480,7 +1490,7 @@ function renderContestView(c, b) {
     const lev = levTxt(r.s.minePct, r.s.fieldPct);
     const lost = r.res && r.res !== r.t;
     const status = r.res ? (r.res === r.t ? ` <span class="stW">✓</span>` : ` <span class="stL">✗</span>`) : "";
-    return `<tr class="${r.res ? (lost ? "lost" : "won") : ""}">
+    return `<tr class="${r.res ? (lost ? "lost" : "won") : isLiveGame(r.g) ? "livegame" : ""}">
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${liveTag(r.g)}${status}</td>
       <td class="num s">${r.res ? (r.res === r.t ? "100%" : "0%") : Math.round(r.wp * 100) + "%"}</td>
       <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : "gold"}">${r.s.mine || ""}</td>
