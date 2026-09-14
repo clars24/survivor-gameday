@@ -1541,19 +1541,6 @@ function renderContestView(c, b) {
           <span class="v">${shareNow.toFixed(2)}% <span class="of" style="color:${dCol}">${d >= 0 ? "+" : "−"}${Math.abs(d).toFixed(2)}%</span></span>
           <span class="s2">of live entries · ${shareIn.toFixed(2)}% entering the week</span></div>`;
       })()}
-      ${(() => {
-        const w = weekTally(c, b);
-        const f = v => v == null ? "—" : fmtN(v);
-        return `<div class="stat"><span class="k">This week</span>
-          <table class="tw">
-            <tr><th></th><th>Ours</th><th>Field</th></tr>
-            <tr class="twS"><td>Surviving</td><td>${w.oursSurv}</td><td>${f(w.fieldSurv)}</td></tr>
-            <tr class="twE"><td>Eliminated</td><td>${w.oursElim}</td><td>${f(w.fieldElim)}</td></tr>
-            <tr class="twP"><td>Pending</td><td class="gold">${w.oursPend}</td><td>${f(w.fieldPend)}</td></tr>
-            <tr class="twT"><td>Total</td><td>${w.oursSurv + w.oursElim + w.oursPend}</td>
-              <td>${w.fieldSurv == null ? "—" : fmtN(w.fieldSurv + w.fieldElim + w.fieldPend)}</td></tr>
-          </table></div>`;
-      })()}
     </div>
     ${cohort}${noNames}${missing}
     <div class="subtabs">
