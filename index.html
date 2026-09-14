@@ -832,11 +832,7 @@ function autoWeek() {
   }
   return 18;
 }
-const fmtMoney = v =>
-  "$" + (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2) + "M"
-       : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(1) + "K"
-       : Math.abs(v) >= 100 ? Math.round(v).toLocaleString("en-US")
-       : v.toFixed(2));
+const fmtMoney = v => "$" + Math.round(v).toLocaleString("en-US");   // exact dollars, no cents
 const fmtSwing = v => (v >= 0 ? "+" : "−") + fmtMoney(Math.abs(v));
 const fmtN = v => v >= 100 ? Math.round(v).toLocaleString("en-US") : (Math.round(v * 10) / 10).toString();
 
