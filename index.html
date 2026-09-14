@@ -161,6 +161,18 @@
     font-size: 24px; line-height: 1.15; font-variant-numeric: tabular-nums; }
   .statrow .of { color: var(--ink-3); font-size: 15px; font-weight: 600; }
   .statrow .s2 { display: block; margin-top: 1px; }
+  .tw { width: auto; border-collapse: collapse; margin-top: 3px; }
+  .tw th { font-size: 9px; letter-spacing: .08em; padding: 0 0 1px 14px; border: none; text-align: right; cursor: default; }
+  .tw th:first-child { padding-left: 0; }
+  .tw td { padding: 1px 0 1px 14px; border: none; font-size: 12.5px; font-weight: 600;
+    text-align: right; font-variant-numeric: tabular-nums; }
+  .tw td:first-child { padding-left: 0; text-align: left; font-weight: 600; font-size: 10px;
+    text-transform: uppercase; letter-spacing: .06em; }
+  .tw tr:hover td { background: none; }
+  .tw tr.twS td { color: var(--money); }
+  .tw tr.twE td { color: var(--bad); }
+  .tw tr.twP td { color: var(--ink); }
+  .tw tr.twP td.gold { color: var(--gold); }
   table.picks { margin-top: 8px; font-size: 13px; }
   table.games { font-size: 13px; }
   table.games.even { table-layout: fixed; width: 100%; }
@@ -1341,6 +1353,31 @@ function renderRooting(R) {
   if (headChanged) wireSort($("rootHead"), mainSort, () => renderRooting(renderRooting._R));
 }
 
+/** This-week tally for the widget: surviving (all picks final+won) / eliminated / pending, ours & field.
+ *  Field numbers come from the import's ownership fractions scaled to the entering size; on a ×2 leg the
+ *  both-must-win share is approximated per leg. Null field = no import yet. */
+function weekTally(c, b) {
+  const oursSurv = survivedWeek(c, b);
+  const oursElim = b.Min0 - b.M;
+  const oursPend = Math.max(0, b.Min0 - oursSurv - oursElim);
+  let frac = 1, haveAll = true;
+  for (const leg of b.legs) {
+    const fd = state.field[c][leg.id];
+    if (!fd || !(fd.alive > 0)) { haveAll = false; break; }
+    let w = 0;
+    for (const g of leg.games) {
+      const res = winnerOf(g, null);
+      if (!res || res === "TIE") continue;
+      w += (fd.own[res] || 0) / fd.alive;
+    }
+    frac *= leg.picks > 1 ? w / leg.picks : w;
+  }
+  const fieldElim = Math.max(0, Math.round(b.Fin0 - b.F));
+  const fieldSurv = haveAll ? Math.round(b.Fin0 * frac) : null;
+  const fieldPend = fieldSurv == null ? null : Math.max(0, Math.round(b.Fin0) - fieldElim - fieldSurv);
+  return { oursSurv, oursElim, oursPend, fieldSurv, fieldElim, fieldPend };
+}
+
 function renderContestView(c, b) {
   const C = CONTESTS[c];
   const cv = $("contestView");
@@ -1413,6 +1450,17 @@ function renderContestView(c, b) {
       <div class="stat"><span class="k">Our share</span>
         <span class="v">${b.F > 0 ? (100 * b.M / Math.max(b.F, b.M)).toFixed(2) : "0"}%</span>
         <span class="s2">of live entries</span></div>
+      ${(() => {
+        const w = weekTally(c, b);
+        const f = v => v == null ? "—" : fmtN(v);
+        return `<div class="stat"><span class="k">This week</span>
+          <table class="tw">
+            <tr><th></th><th>Ours</th><th>Field</th></tr>
+            <tr class="twS"><td>Surviving</td><td>${w.oursSurv}</td><td>${f(w.fieldSurv)}</td></tr>
+            <tr class="twE"><td>Eliminated</td><td>${w.oursElim}</td><td>${f(w.fieldElim)}</td></tr>
+            <tr class="twP"><td>Pending</td><td class="gold">${w.oursPend}</td><td>${f(w.fieldPend)}</td></tr>
+          </table></div>`;
+      })()}
     </div>
     ${cohort}${noNames}${missing}
     <div class="subtabs">
