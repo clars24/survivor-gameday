@@ -1446,7 +1446,7 @@ function renderContestView(c, b) {
   const keepPaste = {};
   cv.querySelectorAll("textarea.impbox").forEach(t => { if (t.value) keepPaste[t.dataset.c] = t.value; });
   const legLabels = b.legs.map(l => l.label + (l.picks > 1 ? " ×2" : "")).join(" + ");
-  const potNote = Number(state.money.pots[c]) > 0 ? "typed" : C.potFixed ? "guaranteed" : `${fmtMoney(feeOf(c))} × ${fmtN(startN(c))}`;
+  const potNote = Number(state.money.pots[c]) > 0 ? "" : C.potFixed ? "guaranteed" : `${fmtMoney(feeOf(c))} × ${fmtN(startN(c))}`;
   const est = b.exact ? "" : ` <span class="warn2" title="No field import for ${b.missingField.join(", ") || "an earlier leg"} — field size is carried forward / defaulted">≈</span>`;
   const cohort = b.cohortLeg ? `<div class="hint warn2">Everyone alive died in ${b.cohortLeg} — the entering cohort splits the pot.</div>` : "";
   const noNames = b.noNames ? `<div class="hint">No entry names yet — open Setup below and add them.</div>` : "";
@@ -1506,7 +1506,7 @@ function renderContestView(c, b) {
   const cvHtml = `<div class="panel">
     <div class="chead">
       <div><h2>${esc(C.name)}</h2>
-        <div class="meta">${legLabels} · pot ${fmtMoney(b.pot)} <span class="s2">(${potNote})</span></div></div>
+        <div class="meta">${legLabels} · pot ${fmtMoney(b.pot)}${potNote ? ` <span class="s2">(${potNote})</span>` : ""}</div></div>
       <div class="cev"><div class="k">Alive EV</div><div class="v ${b.evNow > 0 ? "pos" : ""}">${fmtMoney(b.evNow)}</div>
         <div class="s">live ${fmtMoney(b.evExp)}</div></div>
     </div>
