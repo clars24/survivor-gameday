@@ -639,6 +639,11 @@ function contestStartEV(c) {
   if (o > 0) return o;
   return startN(c) > 0 ? potOf(c) * (state.names[c] || []).length / startN(c) : 0;
 }
+/** Start-of-week EV: in the contest's first week it IS the contest start; afterwards pro-rata entering. */
+function weekStartEV(c, b) {
+  if (legIndex(c, b.legs[0].id) === 0) return contestStartEV(c);
+  return b.Fin0 > 0 ? b.pot * b.Min0 / Math.max(b.Fin0, b.Min0) : 0;
+}
 function potOf(c) {
   const o = Number(state.money.pots[c]);
   if (o > 0) return o;
@@ -1284,7 +1289,7 @@ function renderTiles(R) {
     const b = R.base[c]; if (!b) continue;
     evExp += b.evExp; pots += b.pot;
     startTot += contestStartEV(c);
-    if (b.Fin0 > 0) weekTot += b.pot * b.Min0 / Math.max(b.Fin0, b.Min0);
+    weekTot += weekStartEV(c, b);
     if (!b.exact) anyEst = true;
   }
   const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
@@ -1310,7 +1315,7 @@ function renderStrip(R) {
   const html = CONTEST_KEYS.map(c => {
     const b = R.base[c]; if (!b) return "";
     const startEV = contestStartEV(c);
-    const startWk = b.Fin0 > 0 ? b.pot * b.Min0 / Math.max(b.Fin0, b.Min0) : 0;
+    const startWk = weekStartEV(c, b);
     const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
     const dW = b.evExp - startWk, dC = b.evExp - startEV;
     return `<button class="scard" data-c="${c}">
@@ -1620,7 +1625,7 @@ function renderContestView(c, b) {
         <div class="meta">${legLabels} · pot ${fmtMoney(b.pot)}${potNote ? ` <span class="s2">(${potNote})</span>` : ""}</div></div>
       ${(() => {
         const startEV = contestStartEV(c);
-        const startWk = b.Fin0 > 0 ? b.pot * b.Min0 / Math.max(b.Fin0, b.Min0) : 0;
+        const startWk = weekStartEV(c, b);
         const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
         const dW = b.evExp - startWk, dC = b.evExp - startEV;
         return `<div class="cev"><div class="k">Live EV</div>
