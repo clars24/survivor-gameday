@@ -420,6 +420,7 @@ function normalizeState() {
   if (!state.money) state.money = { pots: {}, fees: {} };
   if (!state.money.pots) state.money.pots = {};
   if (!state.money.fees) state.money.fees = {};
+  if (!state.money.starts) state.money.starts = {};   // starting-EV overrides (cost basis)
 }
 function feeOf(c)  { const o = Number(state.money.fees[c]); return o > 0 ? o : CONTESTS[c].fee; }
 /* Everything read back from the shared store is validated before use: team tokens against NAMES,
@@ -631,6 +632,12 @@ function startN(c) {
   const fd = state.field[c][first];
   if (fd && Number(fd.alive) > 0) return Number(fd.alive);
   return CONTESTS[c].defaultN;
+}
+/** Start-of-contest EV: a typed override (cost basis) wins, else pot × our started share. */
+function contestStartEV(c) {
+  const o = Number(state.money.starts && state.money.starts[c]);
+  if (o > 0) return o;
+  return startN(c) > 0 ? potOf(c) * (state.names[c] || []).length / startN(c) : 0;
 }
 function potOf(c) {
   const o = Number(state.money.pots[c]);
@@ -1276,7 +1283,7 @@ function renderTiles(R) {
   for (const c of CONTEST_KEYS) {
     const b = R.base[c]; if (!b) continue;
     evExp += b.evExp; pots += b.pot;
-    if (startN(c) > 0) startTot += b.pot * (state.names[c] || []).length / startN(c);
+    startTot += contestStartEV(c);
     if (b.Fin0 > 0) weekTot += b.pot * b.Min0 / Math.max(b.Fin0, b.Min0);
     if (!b.exact) anyEst = true;
   }
@@ -1302,7 +1309,7 @@ function renderTiles(R) {
 function renderStrip(R) {
   const html = CONTEST_KEYS.map(c => {
     const b = R.base[c]; if (!b) return "";
-    const startEV = startN(c) > 0 ? b.pot * (state.names[c] || []).length / startN(c) : 0;
+    const startEV = contestStartEV(c);
     const startWk = b.Fin0 > 0 ? b.pot * b.Min0 / Math.max(b.Fin0, b.Min0) : 0;
     const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
     const dW = b.evExp - startWk, dC = b.evExp - startEV;
@@ -1612,7 +1619,7 @@ function renderContestView(c, b) {
       <div><h2>${esc(C.name)}</h2>
         <div class="meta">${legLabels} · pot ${fmtMoney(b.pot)}${potNote ? ` <span class="s2">(${potNote})</span>` : ""}</div></div>
       ${(() => {
-        const startEV = startN(c) > 0 ? b.pot * (state.names[c] || []).length / startN(c) : 0;
+        const startEV = contestStartEV(c);
         const startWk = b.Fin0 > 0 ? b.pot * b.Min0 / Math.max(b.Fin0, b.Min0) : 0;
         const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
         const dW = b.evExp - startWk, dC = b.evExp - startEV;
