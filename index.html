@@ -1284,11 +1284,11 @@ function renderTiles(R) {
   const dW = evExp - weekTot, dC = evExp - startTot;
   setHtml($("tiles"), `
     <div class="tile"><div class="k">Live EV</div>
-      <div class="v money">${fmtMoney(evExp)}</div>
-      <div class="s" style="font-weight:700">
-        <span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2">vs week</span>
-        · <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2">vs start</span></div>
-      <div class="s">started ${fmtMoney(startTot)}</div></div>
+      <div class="v money">${fmtMoney(evExp)}
+        <span style="font-size:17px;font-weight:700;white-space:nowrap">
+          <span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2" style="font-size:11px">wk</span>
+          <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2" style="font-size:11px">start</span></span></div>
+      <div class="s">started week ${fmtMoney(weekTot)} · started contest ${fmtMoney(startTot)}</div></div>
     <div class="tile"><div class="k">Pots</div>
       <div class="potrow prh"><span></span><span>pot</span><span>per entry</span></div>
       ${CONTEST_KEYS.map(c => {
