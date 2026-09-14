@@ -1133,7 +1133,7 @@ async function checkEditKey() {
 (function lockCss() {
   const st = document.createElement("style");
   st.textContent = "body.locked select.pick { pointer-events: none; }" +
-    "body.locked .setwrap, body.locked #btnImport { display: none !important; }";
+    "body.locked .setwrap, body.locked .ourpicks, body.locked #btnImport { display: none !important; }";
   document.head.appendChild(st);
 })();
 window.addEventListener("hashchange", checkEditKey);
@@ -1718,7 +1718,7 @@ function renderContestView(c, b) {
           <td class="num s2">—</td>
         </tr>`;
       })()}</tbody></table></div>
-      <details data-id="picks-${c}"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
+      <details data-id="picks-${c}" class="ourpicks"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
       <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>`}
   </div>`;
   renderContestView._b = b;
