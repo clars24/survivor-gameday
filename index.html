@@ -1512,14 +1512,26 @@ function renderContestView(c, b) {
     </div>
     ${R ? top5Html(R, renderContestView._R0, c) : ""}
     <div class="statrow">
-      <div class="stat"><span class="k">Ours alive</span>
-        <span class="v gold">${b.M}<span class="of">/${(state.names[c] || []).length} started</span></span>
-        <span class="s2">${b.Min0} entered the week</span>
-        <span class="s2" style="font-weight:600;color:var(--bad)">${b.Min0 > 0 ? (100 * Math.max(0, b.Min0 - b.M) / b.Min0).toFixed(1) : "0.0"}% eliminated this week</span></div>
-      <div class="stat"><span class="k">Field alive</span>
-        <span class="v">${fmtN(b.F)}<span class="of">/${fmtN(startN(c))} started</span>${est}</span>
-        <span class="s2">${fmtN(b.Fin0)} entered the week · ${b.src}</span>
-        <span class="s2" style="font-weight:600;color:var(--bad)">${b.Fin0 > 0 ? (100 * Math.max(0, b.Fin0 - b.F) / b.Fin0).toFixed(1) : "0.0"}% eliminated this week</span></div>
+      ${(() => {
+        const wt = weekTally(c, b);
+        const oPct = v => b.Min0 > 0 ? (100 * v / b.Min0).toFixed(1) + "%" : "0.0%";
+        const fTot = wt.fieldSurv == null ? 0 : wt.fieldSurv + wt.fieldElim + wt.fieldPend;
+        const fPct = v => fTot > 0 ? (100 * v / fTot).toFixed(1) + "%" : "—";
+        const line = (color, txt) => `<span class="s2" style="font-weight:600;color:${color}">${txt}</span>`;
+        return `<div class="stat"><span class="k">Ours alive</span>
+          <span class="v gold">${b.M}<span class="of">/${(state.names[c] || []).length} started</span></span>
+          <span class="s2">${b.Min0} entered the week</span>
+          ${line("var(--money)", `${wt.oursSurv} survived · ${oPct(wt.oursSurv)}`)}
+          ${line("var(--gold)", `${wt.oursPend} pending · ${oPct(wt.oursPend)}`)}
+          ${line("var(--bad)", `${wt.oursElim} eliminated · ${oPct(wt.oursElim)}`)}</div>
+        <div class="stat"><span class="k">Field alive</span>
+          <span class="v">${fmtN(b.F)}<span class="of">/${fmtN(startN(c))} started</span>${est}</span>
+          <span class="s2">${fmtN(b.Fin0)} entered the week · ${b.src}</span>
+          ${wt.fieldSurv == null ? line("var(--ink-3)", "no field import yet") : `
+          ${line("var(--money)", `${fmtN(wt.fieldSurv)} survived · ${fPct(wt.fieldSurv)}`)}
+          ${line("var(--ink)", `${fmtN(wt.fieldPend)} pending · ${fPct(wt.fieldPend)}`)}
+          ${line("var(--bad)", `${fmtN(wt.fieldElim)} eliminated · ${fPct(wt.fieldElim)}`)}`}</div>`;
+      })()}
       <div class="stat"><span class="k">Our share</span>
         <span class="v">${b.F > 0 ? (100 * b.M / Math.max(b.F, b.M)).toFixed(2) : "0"}%</span>
         <span class="s2">of live entries</span></div>
