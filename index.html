@@ -1282,9 +1282,8 @@ function renderTiles(R) {
       <div class="v money">${fmtMoney(evExp)}
         <span style="font-size:16px;font-weight:700;color:${dCol}">${sw2(d)}</span></div>
       <div class="s">started ${fmtMoney(startTot)}${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
-    <div class="tile"><div class="k">Total pots</div>
-      <div class="v">${fmtMoney(pots)}</div>
-      <div class="potrow prh"><span></span><span>pot</span><span>per alive</span></div>
+    <div class="tile"><div class="k">Pots</div>
+      <div class="potrow prh"><span></span><span>pot</span><span>per entry</span></div>
       ${CONTEST_KEYS.map(c => {
         const b = R.base[c];
         const pea = b && b.F > 0 ? b.pot / b.F : 0;
