@@ -1526,7 +1526,7 @@ function renderContestView(c, b) {
           ${line("var(--bad)", `${wt.oursElim} eliminated · ${oPct(wt.oursElim)}`)}</div>
         <div class="stat"><span class="k">Field alive</span>
           <span class="v">${fmtN(b.F)}<span class="of">/${fmtN(startN(c))} started</span>${est}</span>
-          <span class="s2">${fmtN(b.Fin0)} entered the week · ${b.src}</span>
+          <span class="s2">${fmtN(b.Fin0)} entered the week</span>
           ${wt.fieldSurv == null ? line("var(--ink-3)", "no field import yet") : `
           ${line("var(--money)", `${fmtN(wt.fieldSurv)} survived · ${fPct(wt.fieldSurv)}`)}
           ${line("var(--ink)", `${fmtN(wt.fieldPend)} pending · ${fPct(wt.fieldPend)}`)}
