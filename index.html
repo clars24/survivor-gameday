@@ -1221,7 +1221,7 @@ function render() {
     setHtml($("root5All"), top5Html(R, R0, null));
     renderTiles(R);
     renderStrip(R);
-    renderRooting(R);
+    renderRooting(R, R0);
   } else {
     // don't rebuild the view under someone mid-paste (sync renders arrive every few seconds)
     const cv = $("contestView");
@@ -1386,7 +1386,7 @@ function top5Html(R, R0, contest) {
   };
   const row = (label, list, marks) => list.length
     ? `<div class="root5"><span class="r5label">${label}</span>` + list.map((x, i) => chip(x, i, marks)).join("") + `</div>` : "";
-  const out = row("Top 5 — start of day", day, true) + row("Top 5 — now", now, false);
+  const out = row("Top 5 rooting interests — start of day", day, true) + row("Top 5 rooting interests — now", now, false);
   return out || `<div class="root5"><span class="r5label">Top 5 to root for</span>
     <span class="s2">appears once entry names and this week's picks are loaded — nothing is worth money yet</span></div>`;
 }
@@ -1395,12 +1395,18 @@ function top5Html(R, R0, contest) {
  * A column per contest with the $ swing (EV if the team wins minus EV if it loses) plus the total,
  * deliberately NO cross-contest entry counts: a Grandissimo entry is worth ~100x a Splash 100 entry,
  * so mixed counts and percentages mislead. Counts live on each contest's own tab. ---- */
-function renderRooting(R) {
+function renderRooting(R, R0) {
   const th2 = (full, sm) => `<span class="th-full">${full}</span><span class="th-sm">${sm}</span>`;
   renderRooting._R = R;
+  if (R0) renderRooting._R0 = R0;
+  R0 = renderRooting._R0;
+  // frozen start-of-day TOTAL swing per team (survives settling — the record of what each result was worth)
+  const sodT = {};
+  if (R0) for (const { g, dTot } of R0.games) { sodT[g.home] = dTot; sodT[g.away] = -dTot; }
   const headChanged = setHtml($("rootHead"), `<tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
     <th class="num sortable mh" data-k="wp">${th2("Win %", "Win")}${sortArrow(mainSort, "wp")}</th>
     ${CONTEST_KEYS.map(c => `<th class="num sortable mh" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
+    <th class="num sortable" data-k="sodt">${th2("Start of day", "SOD")}${sortArrow(mainSort, "sodt")}</th>
     <th class="num sortable" data-k="total">${th2("Total", "Tot")}${sortArrow(mainSort, "total")}</th></tr>`);
   const teamRows = [];
   let anyData = false;
@@ -1417,7 +1423,7 @@ function renderRooting(R) {
       const sign = t === g.home ? 1 : -1;
       const perT = {};
       for (const p of per) perT[p.c] = p.d * sign;
-      teamRows.push({ t, g, k, settled, res, mine, fCnt, perT,
+      teamRows.push({ t, g, k, settled, res, mine, fCnt, perT, sodTot: sodT[t],
         swing: settled ? null : dTot * sign, wp: winP(t, g) });
     }
   }
@@ -1428,6 +1434,7 @@ function renderRooting(R) {
       if (mainSort.key === "team") return mainSort.dir * a.t.localeCompare(b.t) || b.wp - a.wp;
       let av, bv;
       if (mainSort.key === "wp") { av = a.wp; bv = b.wp; }
+      else if (mainSort.key === "sodt") { av = a.sodTot; bv = b.sodTot; }
       else if (mainSort.key === "total") { av = a.settled ? null : a.swing; bv = b.settled ? null : b.swing; }
       else { av = a.settled ? null : a.perT[mainSort.key]; bv = b.settled ? null : b.perT[mainSort.key]; }
       return cmpNum(av, bv, mainSort.dir) || (b.wp - a.wp);
@@ -1447,11 +1454,13 @@ function renderRooting(R) {
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}</span>${liveTag(r.g)}</td>
       <td class="num wp mh">${winCell}</td>
       ${perCells}
+      <td class="num">${r.sodTot == null || isNaN(r.sodTot) || Math.abs(r.sodTot) < 0.5 ? `<span class="s2">—</span>`
+        : `<span style="color:var(--ink-3);font-weight:600">${sw2(r.sodTot)}</span>`}</td>
       <td class="num"><b>${totCell}</b></td>
     </tr>`;
   }).join("");
-  setHtml($("rootBody"), rows || `<tr><td colspan="${3 + CONTEST_KEYS.length}" class="empty">no games this week</td></tr>`);
-  if (headChanged) wireSort($("rootHead"), mainSort, () => renderRooting(renderRooting._R));
+  setHtml($("rootBody"), rows || `<tr><td colspan="${4 + CONTEST_KEYS.length}" class="empty">no games this week</td></tr>`);
+  if (headChanged) wireSort($("rootHead"), mainSort, () => renderRooting(renderRooting._R, renderRooting._R0));
 }
 
 /** This-week tally for the widget: surviving (all picks final+won) / eliminated / pending, ours & field.
