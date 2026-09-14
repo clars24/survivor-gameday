@@ -1434,7 +1434,7 @@ function renderRooting(R, R0) {
     <th class="num sortable mh" data-k="wp">${th2("Win %", "Win")}${sortArrow(mainSort, "wp")}</th>
     ${CONTEST_KEYS.map(c => `<th class="num sortable mh" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
     <th class="num sortable" data-k="sodt">${th2("Start of day", "SOD")}${sortArrow(mainSort, "sodt")}</th>
-    <th class="num sortable" data-k="total">${th2("Total Now", "Now")}${sortArrow(mainSort, "total")}</th>
+    <th class="num sortable" data-k="total">${th2("Worth Now", "Now")}${sortArrow(mainSort, "total")}</th>
     <th class="num sortable" data-k="root">${th2("Root for?", "Root")}${sortArrow(mainSort, "root")}</th></tr>`);
   const teamRows = [];
   let anyData = false;
