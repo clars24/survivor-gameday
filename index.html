@@ -1435,7 +1435,7 @@ function renderRooting(R, R0) {
   if (R0) for (const { g, dTot } of R0.games) { sodT[g.home] = dTot; sodT[g.away] = -dTot; }
   const headChanged = setHtml($("rootHead"), `<tr>
     <th class="bnr"></th><th class="bnr mh"></th>
-    <th class="grp" colspan="${CONTEST_KEYS.length + 3}">If Wins</th></tr>
+    <th class="grp" colspan="${CONTEST_KEYS.length + 2}">If Wins</th><th class="bnr"></th></tr>
     <tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
     <th class="num sortable mh" data-k="wp">${th2("Win %", "Win")}${sortArrow(mainSort, "wp")}</th>
     ${CONTEST_KEYS.map(c => `<th class="num sortable mh" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
@@ -1700,7 +1700,7 @@ function renderContestView(c, b) {
       <div style="overflow-x:auto"><table class="games even"><thead id="cHead">
         <tr><th class="bnr"></th><th class="bnr mh"></th><th class="bnr"></th><th class="bnr mh"></th>
           <th class="bnr"></th><th class="bnr mh"></th><th class="bnr"></th>
-          <th class="grp" colspan="3">If Wins</th></tr>
+          <th class="grp" colspan="2">If Wins</th><th class="bnr"></th></tr>
         <tr><th class="sortable" data-k="team">Team${sortArrow(boardSort, "team")}</th>
         <th class="num sortable mh" data-k="wp"><span class="th-full">Win %</span><span class="th-sm">Win</span>${sortArrow(boardSort, "wp")}</th>
         <th class="num sortable" data-k="ours">Ours${sortArrow(boardSort, "ours")}</th>
