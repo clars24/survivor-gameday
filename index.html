@@ -1446,6 +1446,15 @@ function renderContestView(c, b) {
   // one row per TEAM playing this contest's current-week legs, sorted by win prob;
   // once picks exist for a leg, teams nobody is on disappear
   const R = renderContestView._R;
+  // this contest's start-of-day swing per team — the numbers behind the "Top 5 — start of day" chips
+  const sod = {};
+  const R0 = renderContestView._R0;
+  if (R0) for (const { g, per } of R0.games) {
+    const p = per.find(x => x.c === c);
+    if (!p) continue;
+    sod[g.home] = p.d;
+    sod[g.away] = -p.d;
+  }
   const legsWithMyPicks = new Set(b.rows.filter(r => r.mine > 0).map(r => r.leg));
   const teamRows = [];
   for (const { g, settled } of (R ? R.games : [])) {
@@ -1456,7 +1465,7 @@ function renderContestView(c, b) {
     for (const t of [g.away, g.home]) {
       const s = statTeam(b, c, g, t) || { mine: 0, minePct: 0, fieldCnt: null, fieldPct: null };
       if (dataIn && !s.mine && !(s.fieldCnt > 0)) continue;
-      teamRows.push({ t, g, leg, settled, res, s, wp: winP(t, g) });
+      teamRows.push({ t, g, leg, settled, res, s, wp: winP(t, g), sod: sod[t] });
     }
   }
   const levVal = r => r.s.fieldPct == null ? null : !r.s.minePct ? 0 : r.s.fieldPct === 0 ? Infinity : r.s.minePct / r.s.fieldPct;
@@ -1464,7 +1473,7 @@ function renderContestView(c, b) {
     const K = boardSort.key, d = boardSort.dir;
     if (K === "team") return d * a.t.localeCompare(b2.t) || b2.wp - a.wp;
     const val = r => K === "wp" ? r.wp : K === "ours" ? r.s.mine : K === "ourspct" ? r.s.minePct
-      : K === "field" ? r.s.fieldCnt : K === "fieldpct" ? r.s.fieldPct : levVal(r);
+      : K === "field" ? r.s.fieldCnt : K === "fieldpct" ? r.s.fieldPct : K === "sod" ? r.sod : levVal(r);
     return cmpNum(val(a), val(b2), d) || (b2.wp - a.wp);
   });
   const gameRows = teamRows.map(r => {
@@ -1479,6 +1488,8 @@ function renderContestView(c, b) {
       <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : ""}">${r.s.fieldCnt == null ? "—" : fmtN(r.s.fieldCnt)}</td>
       <td class="num s">${r.s.fieldPct == null ? "—" : r.s.fieldPct.toFixed(1) + "%"}</td>
       <td class="num ${lev.cls}">${lev.txt}</td>
+      <td class="num">${r.sod == null || isNaN(r.sod) || Math.abs(r.sod) < 0.5 ? `<span class="s2">—</span>`
+        : `<span class="${r.sod >= 0 ? "pos" : "neg"}">${fmtSwing(r.sod)}</span>`}</td>
     </tr>`;
   }).join("");
 
@@ -1536,7 +1547,8 @@ function renderContestView(c, b) {
         <th class="num sortable" data-k="ourspct"><span class="th-full">Ours %</span><span class="th-sm">O%</span>${sortArrow(boardSort, "ourspct")}</th>
         <th class="num sortable" data-k="field">Field${sortArrow(boardSort, "field")}</th>
         <th class="num sortable" data-k="fieldpct"><span class="th-full">Field %</span><span class="th-sm">F%</span>${sortArrow(boardSort, "fieldpct")}</th>
-        <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th></tr>
+        <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th>
+        <th class="num sortable" data-k="sod"><span class="th-full">Start of day</span><span class="th-sm">SOD</span>${sortArrow(boardSort, "sod")}</th></tr>
       </thead><tbody id="cGames">${gameRows}${(() => {
         const np = noPickInfo(c, b);
         if (!np) return "";
@@ -1547,6 +1559,7 @@ function renderContestView(c, b) {
           <td class="num s">${np.ours ? np.oursPct.toFixed(1) + "%" : ""}</td>
           <td class="num ${np.field ? "olose" : ""}">${np.field == null ? "—" : fmtN(np.field)}</td>
           <td class="num s">${np.field != null && np.prevN > 0 ? (100 * np.field / np.prevN).toFixed(1) + "%" : "—"}</td>
+          <td class="num s2">—</td>
           <td class="num s2">—</td>
         </tr>`;
       })()}</tbody></table></div>
