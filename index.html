@@ -1301,7 +1301,6 @@ function renderTiles(R) {
       <div class="v" style="color:var(--gold)">${fmtMoney(evExp)}
         <span style="font-size:17px;font-weight:700">
           <span style="white-space:nowrap"><span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2" style="font-size:11px">vs Start of Week</span></span>
-          <span style="white-space:nowrap"><span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2" style="font-size:11px">vs Start of Contest</span></span>
           ${buyin > 0 ? `<span style="white-space:nowrap"><span style="color:${col(dB)}">${sw2(dB)}</span> <span class="s2" style="font-size:11px">vs Total Buy In</span></span>` : ""}</span></div>
       <div class="s">started week ${fmtMoney(weekTot)} · started contest ${fmtMoney(startTot)}${buyin > 0 ? ` · total buy-in ${fmtMoney(buyin)}` : ""}</div></div>
     <div class="tile"><div class="k">Pots</div>
