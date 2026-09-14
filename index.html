@@ -1614,9 +1614,9 @@ function renderContestView(c, b) {
       <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : ""}">${r.s.fieldCnt == null ? "—" : fmtN(r.s.fieldCnt)}</td>
       <td class="num s mh">${r.s.fieldPct == null ? "—" : r.s.fieldPct.toFixed(1) + "%"}</td>
       <td class="num ${lev.cls}">${lev.txt}</td>
-      <td class="num">${r.sod == null || isNaN(r.sod) || Math.abs(r.sod) < 0.5 ? `<span class="s2">—</span>`
+      <td class="num mh">${r.sod == null || isNaN(r.sod) || Math.abs(r.sod) < 0.5 ? `<span class="s2">—</span>`
         : `<span class="${r.sod >= 0 ? "pos" : "neg"}">${sw2(r.sod)}</span>`}</td>
-      <td class="num mh">${r.cur == null || isNaN(r.cur) || Math.abs(r.cur) < 0.5 ? `<span class="s2">—</span>`
+      <td class="num">${r.cur == null || isNaN(r.cur) || Math.abs(r.cur) < 0.5 ? `<span class="s2">—</span>`
         : `<span class="${r.cur >= 0 ? "pos" : "neg"}">${sw2(r.cur)}</span>`}</td>
       <td class="num">${r.cur == null || isNaN(r.cur) || Math.abs(r.cur) < 0.5 ? `<span class="s2">—</span>`
         : r.cur >= 0 ? `<span class="pos" style="font-weight:600">Win</span>` : `<span class="neg" style="font-weight:600">Loss</span>`}</td>
@@ -1699,22 +1699,22 @@ function renderContestView(c, b) {
         <th class="num sortable" data-k="field">Field${sortArrow(boardSort, "field")}</th>
         <th class="num sortable mh" data-k="fieldpct"><span class="th-full">Field %</span><span class="th-sm">F%</span>${sortArrow(boardSort, "fieldpct")}</th>
         <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th>
-        <th class="num sortable" data-k="sod"><span class="th-full">Start of day</span><span class="th-sm">SOD</span>${sortArrow(boardSort, "sod")}</th>
-        <th class="num sortable mh" data-k="cur">Current${sortArrow(boardSort, "cur")}</th>
+        <th class="num sortable mh" data-k="sod"><span class="th-full">Start of day</span><span class="th-sm">SOD</span>${sortArrow(boardSort, "sod")}</th>
+        <th class="num sortable" data-k="cur"><span class="th-full">Current</span><span class="th-sm">Now</span>${sortArrow(boardSort, "cur")}</th>
         <th class="num sortable" data-k="root"><span class="th-full">Root for?</span><span class="th-sm">Root</span>${sortArrow(boardSort, "root")}</th></tr>
       </thead><tbody id="cGames">${gameRows}${(() => {
         const np = noPickInfo(c, b);
         if (!np) return "";
         return `<tr class="lost">
           <td class="match"><span class="res no">No Pick</span><span class="oppn">eliminated — no selection</span></td>
-          <td class="num s">0%</td>
+          <td class="num s mh">0%</td>
           <td class="num ${np.ours ? "olose" : ""}">${np.ours || ""}</td>
-          <td class="num s">${np.ours ? np.oursPct.toFixed(1) + "%" : ""}</td>
+          <td class="num s mh">${np.ours ? np.oursPct.toFixed(1) + "%" : ""}</td>
           <td class="num ${np.field ? "olose" : ""}">${np.field == null ? "—" : fmtN(np.field)}</td>
-          <td class="num s">${np.field != null && np.prevN > 0 ? (100 * np.field / np.prevN).toFixed(1) + "%" : "—"}</td>
-          <td class="num s2">—</td>
+          <td class="num s mh">${np.field != null && np.prevN > 0 ? (100 * np.field / np.prevN).toFixed(1) + "%" : "—"}</td>
           <td class="num s2">—</td>
           <td class="num s2 mh">—</td>
+          <td class="num s2">—</td>
           <td class="num s2">—</td>
         </tr>`;
       })()}</tbody></table></div>
