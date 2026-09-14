@@ -1599,13 +1599,19 @@ function renderContestView(c, b) {
         <div class="meta">${legLabels} · pot ${fmtMoney(b.pot)}${potNote ? ` <span class="s2">(${potNote})</span>` : ""}</div></div>
       ${(() => {
         const startEV = startN(c) > 0 ? b.pot * (state.names[c] || []).length / startN(c) : 0;
-        const d = b.evExp - startEV;
-        const dCol = d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
+        const startWk = b.Fin0 > 0 ? b.pot * b.Min0 / Math.max(b.Fin0, b.Min0) : 0;
+        const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
+        const dW = b.evExp - startWk, dC = b.evExp - startEV;
         return `<div class="cev"><div class="k">Live EV</div>
-          <div class="v ${b.evExp > 0 ? "pos" : ""}">${fmtMoney(b.evExp)}
-            <span style="font-size:17px;font-weight:700;color:${dCol}">${sw2(d)}</span></div>
+          <div class="v ${b.evExp > 0 ? "pos" : ""}">${fmtMoney(b.evExp)}</div>
+          <div class="s" style="font-weight:700">
+            <span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2">vs week</span>
+            · <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2">vs contest</span></div>
           <div class="s">alive ${fmtMoney(b.evNow)}</div></div>
-        <div class="cev"><div class="k">Starting EV</div>
+        <div class="cev"><div class="k">Start of Week EV</div>
+          <div class="v" style="color:var(--ink-3)">${fmtMoney(startWk)}</div>
+          <div class="s">entering week ${week}</div></div>
+        <div class="cev"><div class="k">Start of Contest EV</div>
           <div class="v" style="color:var(--ink-3)">${fmtMoney(startEV)}</div>
           <div class="s">at contest start</div></div>`;
       })()}
