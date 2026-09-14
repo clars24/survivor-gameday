@@ -60,7 +60,8 @@
     font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-weight: 600; font-size: 17px;
     text-transform: uppercase; letter-spacing: .04em; margin-bottom: -1px; }
   .tabs button:hover { color: var(--ink-2); }
-  .tabs button.on { color: var(--ink); border-bottom-color: var(--money); }
+  .tabs button.on { color: var(--ink); border-bottom-color: transparent;
+    outline: 1px solid var(--gold); outline-offset: -1px; border-radius: 10px; }
   .tabs button .tev { font-size: 12px; color: var(--money); margin-left: 6px; letter-spacing: 0; }
 
   .banner { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--warn);
