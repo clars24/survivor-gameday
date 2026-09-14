@@ -239,6 +239,9 @@
   .subtabs button.on { color: var(--ink); border-bottom-color: var(--act); }
   .btn.on { background: var(--act-soft); border-color: var(--act); color: var(--ink); }
   th.sortable { cursor: pointer; user-select: none; }
+  th.bnr { border-bottom: none; padding: 0 8px 1px; }
+  th.grp { text-align: center; color: var(--ink-3); font-size: 9px; letter-spacing: .1em;
+    padding: 0 8px 1px; border-bottom: 1px solid var(--border); cursor: default; }
   th.sortable:hover { color: var(--ink-2); }
   tr.mineRow td { background: var(--act-soft); }
   input.search { width: 200px; text-align: left; }
@@ -1430,7 +1433,10 @@ function renderRooting(R, R0) {
   // frozen start-of-day TOTAL swing per team (survives settling — the record of what each result was worth)
   const sodT = {};
   if (R0) for (const { g, dTot } of R0.games) { sodT[g.home] = dTot; sodT[g.away] = -dTot; }
-  const headChanged = setHtml($("rootHead"), `<tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
+  const headChanged = setHtml($("rootHead"), `<tr>
+    <th class="bnr"></th><th class="bnr mh"></th>
+    <th class="grp" colspan="${CONTEST_KEYS.length + 3}">If Wins</th></tr>
+    <tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
     <th class="num sortable mh" data-k="wp">${th2("Win %", "Win")}${sortArrow(mainSort, "wp")}</th>
     ${CONTEST_KEYS.map(c => `<th class="num sortable mh" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
     <th class="num sortable" data-k="sodt">${th2("Start of day", "SOD")}${sortArrow(mainSort, "sodt")}</th>
