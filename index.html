@@ -1259,16 +1259,20 @@ function survivedWeek(c, b) {
 }
 
 function renderTiles(R) {
-  let evExp = 0, pots = 0, anyEst = false;
+  let evExp = 0, pots = 0, startTot = 0, anyEst = false;
   for (const c of CONTEST_KEYS) {
     const b = R.base[c]; if (!b) continue;
     evExp += b.evExp; pots += b.pot;
+    if (startN(c) > 0) startTot += b.pot * (state.names[c] || []).length / startN(c);
     if (!b.exact) anyEst = true;
   }
+  const d = evExp - startTot;
+  const dCol = d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
   setHtml($("tiles"), `
     <div class="tile"><div class="k">Live EV</div>
-      <div class="v money">${fmtMoney(evExp)}</div>
-      <div class="s">weighted by live win probabilities${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
+      <div class="v money">${fmtMoney(evExp)}
+        <span style="font-size:16px;font-weight:700;color:${dCol}">${sw2(d)}</span></div>
+      <div class="s">started ${fmtMoney(startTot)} · weighted by live win probabilities${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
     <div class="tile"><div class="k">Total pots</div>
       <div class="v">${fmtMoney(pots)}</div>
       <div class="potrow prh"><span></span><span>pot</span><span>per alive</span></div>
