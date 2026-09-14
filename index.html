@@ -1515,11 +1515,11 @@ function renderContestView(c, b) {
       <div class="stat"><span class="k">Ours alive</span>
         <span class="v gold">${b.M}<span class="of">/${(state.names[c] || []).length} started</span></span>
         <span class="s2">${b.Min0} entered the week</span>
-        <span class="s2 neg" style="font-weight:600">${b.Min0 > 0 ? (100 * Math.max(0, b.Min0 - b.M) / b.Min0).toFixed(1) : "0.0"}% eliminated this week</span></div>
+        <span class="s2" style="font-weight:600;color:var(--bad)">${b.Min0 > 0 ? (100 * Math.max(0, b.Min0 - b.M) / b.Min0).toFixed(1) : "0.0"}% eliminated this week</span></div>
       <div class="stat"><span class="k">Field alive</span>
         <span class="v">${fmtN(b.F)}<span class="of">/${fmtN(startN(c))} started</span>${est}</span>
         <span class="s2">${fmtN(b.Fin0)} entered the week · ${b.src}</span>
-        <span class="s2 neg" style="font-weight:600">${b.Fin0 > 0 ? (100 * Math.max(0, b.Fin0 - b.F) / b.Fin0).toFixed(1) : "0.0"}% eliminated this week</span></div>
+        <span class="s2" style="font-weight:600;color:var(--bad)">${b.Fin0 > 0 ? (100 * Math.max(0, b.Fin0 - b.F) / b.Fin0).toFixed(1) : "0.0"}% eliminated this week</span></div>
       <div class="stat"><span class="k">Our share</span>
         <span class="v">${b.F > 0 ? (100 * b.M / Math.max(b.F, b.M)).toFixed(2) : "0"}%</span>
         <span class="s2">of live entries</span></div>
