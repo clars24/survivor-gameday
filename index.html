@@ -95,14 +95,14 @@
     line-height: 1.1; margin-top: 3px; font-variant-numeric: tabular-nums; }
   .tile .v.money { color: var(--money); }
   .tile .s { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
-  .potrow { display: grid; grid-template-columns: max-content max-content max-content; justify-content: start;
-    gap: 0 18px; font-size: 11.5px; margin-top: 2px; font-variant-numeric: tabular-nums; }
-  .potrow span:first-child { color: var(--ink-3); }
-  .potrow span { text-align: right; }
-  .potrow span:first-child { text-align: left; }
-  .potrow span:nth-child(2) { color: var(--ink-2); font-weight: 600; }
-  .potrow .pea { color: var(--money); font-weight: 600; }
-  .potrow.prh span { color: var(--ink-3); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+  .potgrid { display: grid; grid-template-columns: max-content max-content max-content;
+    justify-content: start; gap: 2px 18px; font-size: 11.5px; margin-top: 4px;
+    font-variant-numeric: tabular-nums; }
+  .potgrid .ph { color: var(--ink-3); font-size: 9px; text-transform: uppercase; letter-spacing: .08em;
+    font-weight: 600; text-align: right; }
+  .potgrid .pn { color: var(--ink-3); }
+  .potgrid .pv { text-align: right; color: var(--ink-2); font-weight: 600; }
+  .potgrid .pe { text-align: right; color: var(--money); font-weight: 600; }
   .warn2 { color: var(--warn); }
   .pos { color: var(--money); } .neg { color: var(--bad); }
 
@@ -1298,18 +1298,20 @@ function renderTiles(R) {
   setHtml($("tiles"), `
     <div class="tile"><div class="k">Live EV</div>
       <div class="v" style="color:var(--gold)">${fmtMoney(evExp)}
-        <span style="font-size:17px;font-weight:700;white-space:nowrap">
-          <span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2" style="font-size:11px">vs Start of Week</span>
-          <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2" style="font-size:11px">vs Start of Contest</span>
-          ${buyin > 0 ? `<span style="color:${col(dB)}">${sw2(dB)}</span> <span class="s2" style="font-size:11px">vs Total Buy In</span>` : ""}</span></div>
+        <span style="font-size:17px;font-weight:700">
+          <span style="white-space:nowrap"><span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2" style="font-size:11px">vs Start of Week</span></span>
+          <span style="white-space:nowrap"><span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2" style="font-size:11px">vs Start of Contest</span></span>
+          ${buyin > 0 ? `<span style="white-space:nowrap"><span style="color:${col(dB)}">${sw2(dB)}</span> <span class="s2" style="font-size:11px">vs Total Buy In</span></span>` : ""}</span></div>
       <div class="s">started week ${fmtMoney(weekTot)} · started contest ${fmtMoney(startTot)}${buyin > 0 ? ` · total buy-in ${fmtMoney(buyin)}` : ""}</div></div>
     <div class="tile"><div class="k">Pots</div>
-      <div class="potrow prh"><span></span><span>pot</span><span>per entry</span></div>
-      ${CONTEST_KEYS.map(c => {
-        const b = R.base[c];
-        const pea = b && b.F > 0 ? b.pot / b.F : 0;
-        return `<div class="potrow"><span>${esc(CONTESTS[c].short)}</span><span>${fmtMoney(b ? b.pot : 0)}</span><span class="pea">${fmtMoney(pea)}</span></div>`;
-      }).join("")}
+      <div class="potgrid">
+        <span class="ph"></span><span class="ph">pot</span><span class="ph">per entry</span>
+        ${CONTEST_KEYS.map(c => {
+          const b = R.base[c];
+          const pea = b && b.F > 0 ? b.pot / b.F : 0;
+          return `<span class="pn">${esc(CONTESTS[c].short)}</span><span class="pv">${fmtMoney(b ? b.pot : 0)}</span><span class="pe">${fmtMoney(pea)}</span>`;
+        }).join("")}
+      </div>
     </div>`);
 }
 
