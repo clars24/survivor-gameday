@@ -834,7 +834,7 @@ function autoWeek() {
 }
 const fmtMoney = v =>
   "$" + (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2) + "M"
-       : Math.abs(v) >= 1e4 ? Math.round(v / 1e3) + "K"
+       : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(1) + "K"
        : Math.abs(v) >= 100 ? Math.round(v).toLocaleString("en-US")
        : v.toFixed(2));
 const fmtSwing = v => (v >= 0 ? "+" : "−") + fmtMoney(Math.abs(v));
