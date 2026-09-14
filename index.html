@@ -79,6 +79,8 @@
   .r5m.win { color: var(--money); font-weight: 700; }
   .r5m.lose { color: var(--bad); font-weight: 700; }
   .root5 + .root5 { margin-top: -6px; }
+  .root5.r5now { border: 1px solid var(--gold); border-radius: 12px; padding: 7px 12px; }
+  .root5.r5now + .root5 { margin-top: 0; }
   .panel .root5 { margin: 8px 0 12px; }
   .panel .r5chip { background: var(--card-2); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 0 0 12px; }
@@ -1384,9 +1386,9 @@ function top5Html(R, R0, contest) {
     }
     return `<span class="r5chip${cls}"><span class="rk">${i + 1}</span>${logo(x.t)} <b>${x.t}</b><span class="r5v">${sw2(x.v)}</span>${mark}</span>`;
   };
-  const row = (label, list, marks) => list.length
-    ? `<div class="root5"><span class="r5label">${label}</span>` + list.map((x, i) => chip(x, i, marks)).join("") + `</div>` : "";
-  const out = row("Top 5 rooting interests — now", now, false) + row("Top 5 rooting interests — start of day", day, true);
+  const row = (label, list, marks, cls) => list.length
+    ? `<div class="root5${cls ? " " + cls : ""}"><span class="r5label">${label}</span>` + list.map((x, i) => chip(x, i, marks)).join("") + `</div>` : "";
+  const out = row("Top 5 rooting interests — now", now, false, "r5now") + row("Top 5 rooting interests — start of day", day, true);
   return out || `<div class="root5"><span class="r5label">Top 5 to root for</span>
     <span class="s2">appears once entry names and this week's picks are loaded — nothing is worth money yet</span></div>`;
 }
