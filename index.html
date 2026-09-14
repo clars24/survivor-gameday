@@ -902,7 +902,8 @@ async function livePoll(force) {
     }
     if (changed) queueSave();
     const el = document.activeElement;
-    if (!(document.hasFocus() && el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) render();
+    const holdingFirstPaint = typeof glue !== "undefined" && glue.onFirstData;   // don't paint stale state under a pending live pull
+    if (!holdingFirstPaint && !(document.hasFocus() && el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) render();
   } catch (e) { livePollFails++; }
 }
 /** Small score/clock tag for a team row. */
@@ -997,7 +998,8 @@ function applyRemote(obj) {
     for (const k of SYNC_KEYS) if (present(obj[k])) rs[k] = obj[k];
     glue.last = sj(rs);
     lsSave();
-    if (changedReal) render();   // a heartbeat-only echo repaints nothing
+    if (glue.onFirstData) { glue.onFirstData(); glue.onFirstData = null; render(); }   // first live data: paint now
+    else if (changedReal) render();   // a heartbeat-only echo repaints nothing
     setChip("live", "live · shared");
   })();
 }
@@ -1095,6 +1097,13 @@ async function checkEditKey() {
   document.head.appendChild(st);
 })();
 window.addEventListener("hashchange", checkEditKey);
+/* Refresh flash fix: hold the first paint for the LIVE copy (applyRemote paints it); only if the
+ * network doesn't answer within ~1.4s does the localStorage fallback get drawn. */
+function firstPaint() {
+  const t = setTimeout(() => { if (glue.onFirstData) { glue.onFirstData = null; render(); } }, 1400);
+  glue.onFirstData = () => clearTimeout(t);
+  connectShared();
+}
 async function connectShared() {
   await checkEditKey();
   renderLock();
@@ -1104,7 +1113,10 @@ async function connectShared() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     if (data) applyRemote(data);                    // shared copy wins on join
-    else { glue.last = ""; await syncPush(); }      // empty room: seed it (editors only)
+    else {
+      glue.last = ""; await syncPush();             // empty room: seed it (editors only)
+      if (glue.onFirstData) { glue.onFirstData(); glue.onFirstData = null; render(); }
+    }
     glue.on = true;
     openStream();
     if (!glue.timer) glue.timer = setInterval(() => {
@@ -1133,7 +1145,7 @@ async function poolRestore() {
     if (!payload) { try { payload = JSON.parse(localStorage.getItem("gamedayPool_" + c)); } catch (e) {} }
     if (payload) { unpackPool(c, payload); got = true; }
   }
-  if (got) render();
+  if (got && !glue.onFirstData) render();   // during boot the first-data paint covers it
 }
 
 /* ============================== VIEWS ============================== */
@@ -1922,8 +1934,7 @@ function wireHeader() {
   normalizeState();
   poolRestore();
   wireHeader();
-  render();
-  connectShared();
+  firstPaint();
   livePoll(true);
   setInterval(() => livePoll(), 60000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) livePoll(); });
