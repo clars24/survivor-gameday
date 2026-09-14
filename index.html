@@ -108,7 +108,7 @@
   .scard .row { display: flex; align-items: baseline; justify-content: space-between; margin-top: 2px; }
   .scard .ev { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-weight: 700; font-size: 24px;
     color: var(--money); font-variant-numeric: tabular-nums; }
-  .scard .al { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .scard .al { display: block; margin-top: 2px; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
   .panel { background: var(--card); border-radius: 14px; padding: 15px 17px; margin: 0 0 16px; }
   .panel h2 { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; text-transform: uppercase;
@@ -1300,8 +1300,8 @@ function renderStrip(R) {
     const dCol = d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
     return `<button class="scard" data-c="${c}">
       <div class="nm">${esc(CONTESTS[c].name)}</div>
-      <div class="row"><span class="ev">${m2(b.evExp)} <span style="font-size:13px;font-weight:700;color:${dCol}">${sw2(d)}</span></span>
-        <span class="al">${survivedWeek(c, b)}/${b.Min0} surviving · field ${fmtN(b.F)}</span></div>
+      <div class="ev" style="white-space:nowrap">${m2(b.evExp)} <span style="font-size:13px;font-weight:700;color:${dCol}">${sw2(d)}</span></div>
+      <span class="al">${survivedWeek(c, b)}/${b.Min0} surviving · field ${fmtN(b.F)}</span>
     </button>`;
   }).join("");
   if (setHtml($("conStrip"), html)) $("conStrip").querySelectorAll(".scard").forEach(el => el.onclick = () => {
