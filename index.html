@@ -1521,6 +1521,9 @@ function renderContestView(c, b) {
         <div class="meta">${legLabels} · pot ${fmtMoney(b.pot)}${potNote ? ` <span class="s2">(${potNote})</span>` : ""}</div></div>
       <div class="cev"><div class="k">Alive EV</div><div class="v ${b.evNow > 0 ? "pos" : ""}">${fmtMoney(b.evNow)}</div>
         <div class="s">live ${fmtMoney(b.evExp)}</div></div>
+      <div class="cev"><div class="k">Starting EV</div>
+        <div class="v" style="color:var(--ink-3)">${fmtMoney(startN(c) > 0 ? b.pot * (state.names[c] || []).length / startN(c) : 0)}</div>
+        <div class="s">at season start</div></div>
     </div>
     ${R ? top5Html(R, renderContestView._R0, c) : ""}
     <div class="statrow">
