@@ -88,6 +88,14 @@
     line-height: 1.1; margin-top: 3px; font-variant-numeric: tabular-nums; }
   .tile .v.money { color: var(--money); }
   .tile .s { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
+  .potrow { display: grid; grid-template-columns: 1fr auto auto; gap: 0 14px; font-size: 11.5px;
+    margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .potrow span:first-child { color: var(--ink-3); }
+  .potrow span { text-align: right; }
+  .potrow span:first-child { text-align: left; }
+  .potrow span:nth-child(2) { color: var(--ink-2); font-weight: 600; }
+  .potrow .pea { color: var(--money); font-weight: 600; }
+  .potrow.prh span { color: var(--ink-3); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
   .warn2 { color: var(--warn); }
   .pos { color: var(--money); } .neg { color: var(--bad); }
 
@@ -1222,7 +1230,7 @@ function renderTabs(R) {
   let html = mk("all", "Gameday");
   for (const c of CONTEST_KEYS) {
     const b = R.base[c];
-    html += mk(c, CONTESTS[c].short, b && b.M > 0 ? fmtMoneyK(b.evNow) : "");
+    html += mk(c, CONTESTS[c].short, b && b.M > 0 ? fmtMoneyK(b.evExp) : "");
   }
   if (setHtml(bar, html)) bar.querySelectorAll("button").forEach(b => b.onclick = () => {
     tab = b.dataset.tab; try { localStorage.setItem("gamedayTab", tab); } catch (e) {} render();
@@ -1263,7 +1271,13 @@ function renderTiles(R) {
       <div class="s">weighted by live win probabilities${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
     <div class="tile"><div class="k">Total pots</div>
       <div class="v">${fmtMoney(pots)}</div>
-      <div class="s">four contests</div></div>`);
+      <div class="potrow prh"><span></span><span>pot</span><span>per alive</span></div>
+      ${CONTEST_KEYS.map(c => {
+        const b = R.base[c];
+        const pea = b && b.F > 0 ? b.pot / b.F : 0;
+        return `<div class="potrow"><span>${esc(CONTESTS[c].short)}</span><span>${fmtMoney(b ? b.pot : 0)}</span><span class="pea">${fmtMoney(pea)}</span></div>`;
+      }).join("")}
+    </div>`);
 }
 
 function renderStrip(R) {
@@ -1271,7 +1285,7 @@ function renderStrip(R) {
     const b = R.base[c]; if (!b) return "";
     return `<button class="scard" data-c="${c}">
       <div class="nm">${esc(CONTESTS[c].name)}</div>
-      <div class="row"><span class="ev">${m2(b.evNow)}</span>
+      <div class="row"><span class="ev">${m2(b.evExp)}</span>
         <span class="al">${survivedWeek(c, b)}/${b.Min0} surviving · field ${fmtN(b.F)}</span></div>
     </button>`;
   }).join("");
