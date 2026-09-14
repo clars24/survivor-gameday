@@ -173,6 +173,7 @@
   .tw tr.twE td { color: var(--bad); }
   .tw tr.twP td { color: var(--ink); }
   .tw tr.twP td.gold { color: var(--gold); }
+  .tw tr.twT td { color: var(--ink); border-top: 1px solid var(--border); }
   table.picks { margin-top: 8px; font-size: 13px; }
   table.games { font-size: 13px; }
   table.games.even { table-layout: fixed; width: 100%; }
@@ -1459,6 +1460,8 @@ function renderContestView(c, b) {
             <tr class="twS"><td>Surviving</td><td>${w.oursSurv}</td><td>${f(w.fieldSurv)}</td></tr>
             <tr class="twE"><td>Eliminated</td><td>${w.oursElim}</td><td>${f(w.fieldElim)}</td></tr>
             <tr class="twP"><td>Pending</td><td class="gold">${w.oursPend}</td><td>${f(w.fieldPend)}</td></tr>
+            <tr class="twT"><td>Total</td><td>${w.oursSurv + w.oursElim + w.oursPend}</td>
+              <td>${w.fieldSurv == null ? "—" : fmtN(w.fieldSurv + w.fieldElim + w.fieldPend)}</td></tr>
           </table></div>`;
       })()}
     </div>
