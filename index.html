@@ -27,6 +27,8 @@
     --bad-soft: #e0604e1a;
   }
   .gold { color: var(--gold); font-weight: 600; }
+  .owin { color: var(--money); font-weight: 600; }   /* our entries that survived */
+  .olose { color: var(--bad); font-weight: 600; }    /* our entries eliminated */
   * { box-sizing: border-box; }
   html { background: var(--ground); }
   body { margin: 0; background: var(--ground); color: var(--ink);
@@ -1385,7 +1387,7 @@ function renderContestView(c, b) {
     return `<tr class="${r.res ? (lost ? "lost" : "won") : ""}">
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${liveTag(r.g)}${status}</td>
       <td class="num s">${r.res ? (r.res === r.t ? "100%" : "0%") : Math.round(r.wp * 100) + "%"}</td>
-      <td class="num gold">${r.s.mine || ""}</td>
+      <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : "gold"}">${r.s.mine || ""}</td>
       <td class="num s">${r.s.mine ? r.s.minePct.toFixed(1) + "%" : ""}</td>
       <td class="num">${r.s.fieldCnt == null ? "—" : fmtN(r.s.fieldCnt)}</td>
       <td class="num s">${r.s.fieldPct == null ? "—" : r.s.fieldPct.toFixed(1) + "%"}</td>
