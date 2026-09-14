@@ -1450,6 +1450,33 @@ function weekTally(c, b) {
   return { oursSurv, oursElim, oursPend, fieldSurv, fieldElim, fieldPend };
 }
 
+/** Re-run name matching against the ALREADY-imported pool — so typing entry names after the import
+ *  (any order) still claims their picks and expands blocks. Returns picks written. */
+function rematchFromPool(c) {
+  const P = pool[c];
+  if (!P || !P.names.length) return 0;
+  const match = myMatcher(c);
+  const discovered = new Set(), matchedTyped = new Set();
+  let hits = 0;
+  for (let i = 0; i < P.names.length; i++) {
+    const full = String(P.names[i]).trim();
+    const typed = match(full);
+    if (!typed) continue;
+    discovered.add(full); matchedTyped.add(typed);
+    for (const legId in P.legs) {
+      const v = P.legs[legId][i];
+      if (v == null) continue;
+      (state.mine[c][full] || (state.mine[c][full] = {}))[legId] = v;
+      hits++;
+    }
+  }
+  if (discovered.size) {
+    const keep = (state.names[c] || []).filter(n => !matchedTyped.has(String(n).trim()) || discovered.has(String(n).trim()));
+    state.names[c] = [...new Set([...keep, ...discovered])];
+  }
+  return hits;
+}
+
 function renderContestView(c, b) {
   const C = CONTESTS[c];
   const cv = $("contestView");
@@ -1756,7 +1783,7 @@ function wireContestView(c) {
   const commitNms = t => { state.names[t.dataset.c] = t.value.split(/\r?\n/).map(x => x.trim()).filter(Boolean); lsSave(); };
   cv.querySelectorAll("textarea.nms").forEach(t => {
     t.oninput = () => commitNms(t);
-    t.onchange = () => { commitNms(t); touch(); };
+    t.onchange = () => { commitNms(t); rematchFromPool(t.dataset.c); touch(); };
   });
   const numCommit = (i, write) => {
     const v = parseFloat(i.value.replace(/[,$]/g, ""));
@@ -1781,9 +1808,11 @@ function wireContestView(c) {
     const cc = b.dataset.c;
     const t = cv.querySelector(`textarea.nms[data-c="${cc}"]`);
     if (t) commitNms(t);
+    const hits = rematchFromPool(cc);
     touch();
     const st = $(`impstat-${cc}`);
-    if (st) st.textContent = `✓ saved ${(state.names[cc] || []).length} entry names · ${new Date().toLocaleTimeString()}`;
+    if (st) st.textContent = `✓ saved ${(state.names[cc] || []).length} entry names` +
+      (hits ? ` · matched ${hits} picks from the imported field` : "") + ` · ${new Date().toLocaleTimeString()}`;
   });
   cv.querySelectorAll("button.impbtn").forEach(b => b.onclick = () => runImport(b.dataset.c));
   cv.querySelectorAll("button.impattach").forEach(b => b.onclick = () =>
