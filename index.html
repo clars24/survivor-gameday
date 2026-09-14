@@ -1251,22 +1251,16 @@ function survivedWeek(c, b) {
 }
 
 function renderTiles(R) {
-  let evNow = 0, evExp = 0, pots = 0, surv = 0, mine0 = 0, anyEst = false;
+  let evExp = 0, pots = 0, anyEst = false;
   for (const c of CONTEST_KEYS) {
     const b = R.base[c]; if (!b) continue;
-    evNow += b.evNow; evExp += b.evExp; pots += b.pot; surv += survivedWeek(c, b); mine0 += b.Min0;
+    evExp += b.evExp; pots += b.pot;
     if (!b.exact) anyEst = true;
   }
   setHtml($("tiles"), `
-    <div class="tile"><div class="k">Alive EV</div>
-      <div class="v money">${fmtMoney(evNow)}</div>
-      <div class="s">final games only${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
     <div class="tile"><div class="k">Live EV</div>
-      <div class="v">${fmtMoney(evExp)}</div>
-      <div class="s">weighted by live win probabilities</div></div>
-    <div class="tile"><div class="k">Surviving Entries (this week)</div>
-      <div class="v">${surv}<span style="color:var(--ink-3)">/${mine0}</span></div>
-      <div class="s">picks that have won · all contests</div></div>
+      <div class="v money">${fmtMoney(evExp)}</div>
+      <div class="s">weighted by live win probabilities${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
     <div class="tile"><div class="k">Total pots</div>
       <div class="v">${fmtMoney(pots)}</div>
       <div class="s">four contests</div></div>`);
