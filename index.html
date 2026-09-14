@@ -1293,14 +1293,16 @@ function renderTiles(R) {
     if (!b.exact) anyEst = true;
   }
   const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
-  const dW = evExp - weekTot, dC = evExp - startTot;
+  const buyin = Number(state.money.buyin) || 0;
+  const dW = evExp - weekTot, dC = evExp - startTot, dB = evExp - buyin;
   setHtml($("tiles"), `
     <div class="tile"><div class="k">Live EV</div>
       <div class="v" style="color:var(--gold)">${fmtMoney(evExp)}
         <span style="font-size:17px;font-weight:700;white-space:nowrap">
           <span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2" style="font-size:11px">vs Start of Week</span>
-          <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2" style="font-size:11px">vs Start of Contest</span></span></div>
-      <div class="s">started week ${fmtMoney(weekTot)} · started contest ${fmtMoney(startTot)}</div></div>
+          <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2" style="font-size:11px">vs Start of Contest</span>
+          ${buyin > 0 ? `<span style="color:${col(dB)}">${sw2(dB)}</span> <span class="s2" style="font-size:11px">vs Total Buy In</span>` : ""}</span></div>
+      <div class="s">started week ${fmtMoney(weekTot)} · started contest ${fmtMoney(startTot)}${buyin > 0 ? ` · total buy-in ${fmtMoney(buyin)}` : ""}</div></div>
     <div class="tile"><div class="k">Pots</div>
       <div class="potrow prh"><span></span><span>pot</span><span>per entry</span></div>
       ${CONTEST_KEYS.map(c => {
