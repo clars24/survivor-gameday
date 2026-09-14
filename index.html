@@ -1328,7 +1328,7 @@ function renderStrip(R) {
       <div style="font-size:12px;font-weight:700">
         <span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2">vs week</span>
         · <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2">vs start</span></div>
-      <span class="al"><span class="gold">${survivedWeek(c, b)}</span>/${b.Min0} surviving · field ${fmtN(b.F)}</span>
+      <span class="al"><span class="gold">${b.M}</span>/${b.Min0} alive · field ${fmtN(b.F)}</span>
     </button>`;
   }).join("");
   if (setHtml($("conStrip"), html)) $("conStrip").querySelectorAll(".scard").forEach(el => el.onclick = () => {
