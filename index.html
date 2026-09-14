@@ -66,7 +66,10 @@
   .banner { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--warn);
     border-radius: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--ink-2); margin: 0 0 14px; }
 
-  .root5 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
+  .root5 { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none; margin: 0 0 14px; }
+  .root5::-webkit-scrollbar { display: none; }
+  .r5chip, .r5label { flex: 0 0 auto; }
   .r5label { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; text-transform: uppercase;
     letter-spacing: .05em; color: var(--ink-3); font-weight: 600; font-size: 15px; }
   .r5chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card);
@@ -209,10 +212,6 @@
     table.games td .pos, table.games td .neg { white-space: nowrap; }
     .res { padding: 3px 6px; font-size: 12px; }
     .tlogo { width: 15px; height: 15px; }
-    .root5 { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
-    .root5::-webkit-scrollbar { display: none; }
-    .r5chip { flex: 0 0 auto; }
-    .r5label { flex: 0 0 auto; }
     .brand { font-size: 25px; }
     .cev .v { font-size: 27px; }
     .chead { gap: 16px; }
@@ -1270,19 +1269,22 @@ function survivedWeek(c, b) {
 }
 
 function renderTiles(R) {
-  let evExp = 0, pots = 0, startTot = 0, anyEst = false;
+  let evExp = 0, pots = 0, startTot = 0, weekTot = 0, anyEst = false;
   for (const c of CONTEST_KEYS) {
     const b = R.base[c]; if (!b) continue;
     evExp += b.evExp; pots += b.pot;
     if (startN(c) > 0) startTot += b.pot * (state.names[c] || []).length / startN(c);
+    if (b.Fin0 > 0) weekTot += b.pot * b.Min0 / Math.max(b.Fin0, b.Min0);
     if (!b.exact) anyEst = true;
   }
-  const d = evExp - startTot;
-  const dCol = d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
+  const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
+  const dW = evExp - weekTot, dC = evExp - startTot;
   setHtml($("tiles"), `
     <div class="tile"><div class="k">Live EV</div>
-      <div class="v money">${fmtMoney(evExp)}
-        <span style="font-size:16px;font-weight:700;color:${dCol}">${sw2(d)}</span></div>
+      <div class="v money">${fmtMoney(evExp)}</div>
+      <div class="s" style="font-weight:700">
+        <span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2">vs week</span>
+        · <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2">vs start</span></div>
       <div class="s">started ${fmtMoney(startTot)}${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
     <div class="tile"><div class="k">Pots</div>
       <div class="potrow prh"><span></span><span>pot</span><span>per entry</span></div>
@@ -1298,11 +1300,15 @@ function renderStrip(R) {
   const html = CONTEST_KEYS.map(c => {
     const b = R.base[c]; if (!b) return "";
     const startEV = startN(c) > 0 ? b.pot * (state.names[c] || []).length / startN(c) : 0;
-    const d = b.evExp - startEV;
-    const dCol = d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
+    const startWk = b.Fin0 > 0 ? b.pot * b.Min0 / Math.max(b.Fin0, b.Min0) : 0;
+    const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
+    const dW = b.evExp - startWk, dC = b.evExp - startEV;
     return `<button class="scard" data-c="${c}">
       <div class="nm">${esc(CONTESTS[c].name)}</div>
-      <div class="ev" style="white-space:nowrap">${m2(b.evExp)} <span style="font-size:13px;font-weight:700;color:${dCol}">${sw2(d)}</span></div>
+      <div class="ev" style="white-space:nowrap">${m2(b.evExp)}</div>
+      <div style="font-size:12px;font-weight:700">
+        <span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2">vs week</span>
+        · <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2">vs start</span></div>
       <span class="al"><span class="gold">${survivedWeek(c, b)}</span>/${b.Min0} surviving · field ${fmtN(b.F)}</span>
     </button>`;
   }).join("");
