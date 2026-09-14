@@ -186,11 +186,12 @@
   table.games td { padding-top: 5px; padding-bottom: 5px; }
   .oppn { color: var(--ink-3); font-size: 11.5px; margin-left: 6px; }
   .lscore { color: var(--ink-3); font-size: 11.5px; margin-left: 6px; white-space: nowrap; }
-  .th-sm { display: none; }
+  .th-sm, .m-sm { display: none; }
   @media (max-width: 640px) {
     .oppn { display: none; }
-    .th-full { display: none; }
-    .th-sm { display: inline; }
+    .th-full, .m-full { display: none; }
+    .th-sm, .m-sm { display: inline; }
+    .mh { display: none !important; }
     table.games { font-size: 12px; }
     table.games th, table.games td { padding-left: 4px; padding-right: 4px; }
     table.games.even th:first-child, table.games.even td:first-child { width: 21%; }
@@ -838,6 +839,11 @@ function autoWeek() {
   return 18;
 }
 const fmtMoney = v => "$" + Math.round(v).toLocaleString("en-US");   // exact dollars, no cents
+// compact variant for phone-width table cells; desktop always shows the exact figure
+const fmtMoneyK = v => "$" + (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2) + "M"
+  : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(1) + "K" : Math.round(v).toLocaleString("en-US"));
+const sw2 = v => `<span class="m-full">${fmtSwing(v)}</span><span class="m-sm">${(v >= 0 ? "+" : "−") + fmtMoneyK(Math.abs(v))}</span>`;
+const m2 = v => `<span class="m-full">${fmtMoney(v)}</span><span class="m-sm">${fmtMoneyK(v)}</span>`;
 const fmtSwing = v => (v >= 0 ? "+" : "−") + fmtMoney(Math.abs(v));
 const fmtN = v => v >= 100 ? Math.round(v).toLocaleString("en-US") : (Math.round(v * 10) / 10).toString();
 
@@ -1216,7 +1222,7 @@ function renderTabs(R) {
   let html = mk("all", "Gameday");
   for (const c of CONTEST_KEYS) {
     const b = R.base[c];
-    html += mk(c, CONTESTS[c].short, b && b.M > 0 ? fmtMoney(b.evNow) : "");
+    html += mk(c, CONTESTS[c].short, b && b.M > 0 ? fmtMoneyK(b.evNow) : "");
   }
   if (setHtml(bar, html)) bar.querySelectorAll("button").forEach(b => b.onclick = () => {
     tab = b.dataset.tab; try { localStorage.setItem("gamedayTab", tab); } catch (e) {} render();
@@ -1271,7 +1277,7 @@ function renderStrip(R) {
     const b = R.base[c]; if (!b) return "";
     return `<button class="scard" data-c="${c}">
       <div class="nm">${esc(CONTESTS[c].name)}</div>
-      <div class="row"><span class="ev">${fmtMoney(b.evNow)}</span>
+      <div class="row"><span class="ev">${m2(b.evNow)}</span>
         <span class="al">${survivedWeek(c, b)}/${b.Min0} surviving · field ${fmtN(b.F)}</span></div>
     </button>`;
   }).join("");
@@ -1353,7 +1359,7 @@ function top5Html(R, R0, contest) {
       if (res === x.t) { mark = ` <span class="r5m win">✓</span>`; cls = " win"; }
       else if (res) { mark = ` <span class="r5m lose">✗</span>`; cls = " lose"; }
     }
-    return `<span class="r5chip${cls}"><span class="rk">${i + 1}</span>${logo(x.t)} <b>${x.t}</b><span class="r5v">${fmtSwing(x.v)}</span>${mark}</span>`;
+    return `<span class="r5chip${cls}"><span class="rk">${i + 1}</span>${logo(x.t)} <b>${x.t}</b><span class="r5v">${sw2(x.v)}</span>${mark}</span>`;
   };
   const row = (label, list, marks) => list.length
     ? `<div class="root5"><span class="r5label">${label}</span>` + list.map((x, i) => chip(x, i, marks)).join("") + `</div>` : "";
@@ -1371,7 +1377,7 @@ function renderRooting(R) {
   renderRooting._R = R;
   const headChanged = setHtml($("rootHead"), `<tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
     <th class="num sortable" data-k="wp">${th2("Win %", "Win")}${sortArrow(mainSort, "wp")}</th>
-    ${CONTEST_KEYS.map(c => `<th class="num sortable" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
+    ${CONTEST_KEYS.map(c => `<th class="num sortable mh" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
     <th class="num sortable" data-k="total">${th2("Total", "Tot")}${sortArrow(mainSort, "total")}</th></tr>`);
   const teamRows = [];
   let anyData = false;
@@ -1405,12 +1411,12 @@ function renderRooting(R) {
     });
   const money = (v) => v == null || isNaN(v) ? `<span class="s2">—</span>`
     : Math.abs(v) < 0.5 ? `<span class="s2">—</span>`
-    : `<span class="${v >= 0 ? "pos" : "neg"}">${fmtSwing(v)}</span>`;
+    : `<span class="${v >= 0 ? "pos" : "neg"}">${sw2(v)}</span>`;
   const rows = shown.map(r => {
     const lost = r.res && r.res !== r.t;
     const winCell = r.res ? (r.res === r.t ? "100%" : "0%") : `${Math.round(r.wp * 100)}%`;
     const perCells = CONTEST_KEYS.map(c =>
-      `<td class="num">${r.settled ? `<span class="s2">—</span>` : money(r.perT[c])}</td>`).join("");
+      `<td class="num mh">${r.settled ? `<span class="s2">—</span>` : money(r.perT[c])}</td>`).join("");
     const totCell = r.settled
       ? `<span class="s2">${r.res === r.t ? "✓ won" : "✗ lost"}</span>`
       : money(r.swing);
@@ -1533,12 +1539,12 @@ function renderContestView(c, b) {
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${liveTag(r.g)}${status}</td>
       <td class="num s">${r.res ? (r.res === r.t ? "100%" : "0%") : Math.round(r.wp * 100) + "%"}</td>
       <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : "gold"}">${r.s.mine || ""}</td>
-      <td class="num s">${r.s.mine ? r.s.minePct.toFixed(1) + "%" : ""}</td>
+      <td class="num s mh">${r.s.mine ? r.s.minePct.toFixed(1) + "%" : ""}</td>
       <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : ""}">${r.s.fieldCnt == null ? "—" : fmtN(r.s.fieldCnt)}</td>
-      <td class="num s">${r.s.fieldPct == null ? "—" : r.s.fieldPct.toFixed(1) + "%"}</td>
+      <td class="num s mh">${r.s.fieldPct == null ? "—" : r.s.fieldPct.toFixed(1) + "%"}</td>
       <td class="num ${lev.cls}">${lev.txt}</td>
       <td class="num">${r.sod == null || isNaN(r.sod) || Math.abs(r.sod) < 0.5 ? `<span class="s2">—</span>`
-        : `<span class="${r.sod >= 0 ? "pos" : "neg"}">${fmtSwing(r.sod)}</span>`}</td>
+        : `<span class="${r.sod >= 0 ? "pos" : "neg"}">${sw2(r.sod)}</span>`}</td>
     </tr>`;
   }).join("");
 
@@ -1546,11 +1552,18 @@ function renderContestView(c, b) {
     <div class="chead">
       <div><h2>${esc(C.name)}</h2>
         <div class="meta">${legLabels} · pot ${fmtMoney(b.pot)}${potNote ? ` <span class="s2">(${potNote})</span>` : ""}</div></div>
-      <div class="cev"><div class="k">Live EV</div><div class="v ${b.evExp > 0 ? "pos" : ""}">${fmtMoney(b.evExp)}</div>
-        <div class="s">alive ${fmtMoney(b.evNow)}</div></div>
-      <div class="cev"><div class="k">Starting EV</div>
-        <div class="v" style="color:var(--ink-3)">${fmtMoney(startN(c) > 0 ? b.pot * (state.names[c] || []).length / startN(c) : 0)}</div>
-        <div class="s">at contest start</div></div>
+      ${(() => {
+        const startEV = startN(c) > 0 ? b.pot * (state.names[c] || []).length / startN(c) : 0;
+        const d = b.evExp - startEV;
+        const dCol = d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
+        return `<div class="cev"><div class="k">Live EV</div>
+          <div class="v ${b.evExp > 0 ? "pos" : ""}">${fmtMoney(b.evExp)}
+            <span style="font-size:17px;font-weight:700;color:${dCol}">${sw2(d)}</span></div>
+          <div class="s">alive ${fmtMoney(b.evNow)}</div></div>
+        <div class="cev"><div class="k">Starting EV</div>
+          <div class="v" style="color:var(--ink-3)">${fmtMoney(startEV)}</div>
+          <div class="s">at contest start</div></div>`;
+      })()}
     </div>
     ${R ? top5Html(R, renderContestView._R0, c) : ""}
     <div class="statrow">
@@ -1601,9 +1614,9 @@ function renderContestView(c, b) {
         <tr><th class="sortable" data-k="team">Team${sortArrow(boardSort, "team")}</th>
         <th class="num sortable" data-k="wp"><span class="th-full">Win %</span><span class="th-sm">Win</span>${sortArrow(boardSort, "wp")}</th>
         <th class="num sortable" data-k="ours">Ours${sortArrow(boardSort, "ours")}</th>
-        <th class="num sortable" data-k="ourspct"><span class="th-full">Ours %</span><span class="th-sm">O%</span>${sortArrow(boardSort, "ourspct")}</th>
+        <th class="num sortable mh" data-k="ourspct"><span class="th-full">Ours %</span><span class="th-sm">O%</span>${sortArrow(boardSort, "ourspct")}</th>
         <th class="num sortable" data-k="field">Field${sortArrow(boardSort, "field")}</th>
-        <th class="num sortable" data-k="fieldpct"><span class="th-full">Field %</span><span class="th-sm">F%</span>${sortArrow(boardSort, "fieldpct")}</th>
+        <th class="num sortable mh" data-k="fieldpct"><span class="th-full">Field %</span><span class="th-sm">F%</span>${sortArrow(boardSort, "fieldpct")}</th>
         <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th>
         <th class="num sortable" data-k="sod"><span class="th-full">Start of day</span><span class="th-sm">SOD</span>${sortArrow(boardSort, "sod")}</th></tr>
       </thead><tbody id="cGames">${gameRows}${(() => {
