@@ -127,6 +127,7 @@
   .res { display: inline-block; border: 1px solid var(--border); background: transparent; color: var(--ink-2);
     padding: 4px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; font-family: inherit; }
   .res.on { background: var(--money); border-color: var(--money); color: #08130c; }
+  .res.no { background: var(--bad); border-color: var(--bad); color: #fff; }
   .at { color: var(--ink-3); margin: 0 7px; font-size: 12px; }
   .rooted { font-weight: 600; white-space: nowrap; }
   .rooted.done, .rooted.none { color: var(--ink-3); font-weight: 400; }
@@ -583,10 +584,10 @@ function teamLostIn(leg, t, hyp) {
   return !!w && w !== t;
 }
 function startN(c) {
+  if (Number(state.sizes[c]) > 0) return Number(state.sizes[c]);   // typed size is a MANUAL OVERRIDE
   const first = CONTESTS[c].legs[0].id;
   const fd = state.field[c][first];
   if (fd && Number(fd.alive) > 0) return Number(fd.alive);
-  if (Number(state.sizes[c]) > 0) return Number(state.sizes[c]);
   return CONTESTS[c].defaultN;
 }
 function potOf(c) {
@@ -604,18 +605,24 @@ function myEntryAliveUpTo(c, name, uptoIdx, hyp) {
 }
 function fieldAliveEntering(c, i) {
   const legs = CONTESTS[c].legs;
-  let j = -1;
-  for (let k = i; k >= 0; k--) {
-    const fd = state.field[c][legs[k].id];
-    if (fd && fd.alive > 0) { j = k; break; }
-  }
-  let n, exact, src;
-  if (j < 0) {
-    n = startN(c); exact = false; j = 0;
-    src = state.sizes[c] > 0 ? "typed size" : "default size";
+  const manual = Number(state.sizes[c]);
+  let j = -1, n, exact, src;
+  if (manual > 0) {
+    // typed size is authoritative: anchor the season start on it and step forward with the
+    // imports' loss FRACTIONS (shares survive a different absolute size)
+    n = manual; exact = true; j = 0; src = "manual size";
   } else {
-    n = state.field[c][legs[j].id].alive; exact = true;
-    src = legs[j].id + " import";
+    for (let k = i; k >= 0; k--) {
+      const fd = state.field[c][legs[k].id];
+      if (fd && fd.alive > 0) { j = k; break; }
+    }
+    if (j < 0) {
+      n = startN(c); exact = false; j = 0;
+      src = "default size";
+    } else {
+      n = state.field[c][legs[j].id].alive; exact = true;
+      src = legs[j].id + " import";
+    }
   }
   for (; j < i; j++) {
     const leg = legs[j], fd = state.field[c][leg.id];
@@ -1064,6 +1071,16 @@ function touch() { queueSave(); render(); }
 let tab = (function () { try { return localStorage.getItem("gamedayTab") || "all"; } catch (e) { return "all"; } })();
 if (tab !== "all" && !CONTESTS[tab]) tab = "all";
 
+/** Write innerHTML only when it actually changed — unchanged sections never repaint, so an update
+ *  redraws just the cells that moved instead of blinking the whole page. */
+function setHtml(el, html) {
+  if (!el) return false;
+  if (el.__h === html) return false;
+  el.__h = html;
+  el.innerHTML = html;
+  return true;
+}
+
 const openPanels = new Set();
 function trackDetails(root) {
   root.querySelectorAll("details[data-id]").forEach(d => {
@@ -1092,7 +1109,7 @@ function render() {
   $("viewAll").style.display = showAll ? "" : "none";
   $("contestView").style.display = showAll ? "none" : "";
   if (showAll) {
-    $("root5All").innerHTML = top5Html(R, R0, null);
+    setHtml($("root5All"), top5Html(R, R0, null));
     renderTiles(R);
     renderStrip(R);
     renderRooting(R);
@@ -1107,19 +1124,17 @@ function render() {
 }
 
 function renderTabs(R) {
-  const bar = $("tabBar"); bar.innerHTML = "";
-  const mk = (key, label, evTxt) => {
-    const b = document.createElement("button");
-    b.innerHTML = esc(label) + (evTxt ? ` <span class="tev">${evTxt}</span>` : "");
-    b.className = tab === key ? "on" : "";
-    b.onclick = () => { tab = key; try { localStorage.setItem("gamedayTab", key); } catch (e) {} render(); };
-    bar.appendChild(b);
-  };
-  mk("all", "Gameday");
+  const bar = $("tabBar");
+  const mk = (key, label, evTxt) =>
+    `<button data-tab="${key}" class="${tab === key ? "on" : ""}">${esc(label)}${evTxt ? ` <span class="tev">${evTxt}</span>` : ""}</button>`;
+  let html = mk("all", "Gameday");
   for (const c of CONTEST_KEYS) {
     const b = R.base[c];
-    mk(c, CONTESTS[c].short, b && b.M > 0 ? fmtMoney(b.evNow) : "");
+    html += mk(c, CONTESTS[c].short, b && b.M > 0 ? fmtMoney(b.evNow) : "");
   }
+  if (setHtml(bar, html)) bar.querySelectorAll("button").forEach(b => b.onclick = () => {
+    tab = b.dataset.tab; try { localStorage.setItem("gamedayTab", tab); } catch (e) {} render();
+  });
 }
 
 /** Entries that have fully SURVIVED the week: every one of this week's picks is final and won. */
@@ -1150,7 +1165,7 @@ function renderTiles(R) {
     evNow += b.evNow; evExp += b.evExp; pots += b.pot; surv += survivedWeek(c, b); mine0 += b.Min0;
     if (!b.exact) anyEst = true;
   }
-  $("tiles").innerHTML = `
+  setHtml($("tiles"), `
     <div class="tile"><div class="k">Alive EV</div>
       <div class="v money">${fmtMoney(evNow)}</div>
       <div class="s">final games only${anyEst ? " · <span class='warn2'>parts estimated</span>" : ""}</div></div>
@@ -1162,11 +1177,11 @@ function renderTiles(R) {
       <div class="s">picks that have won · all contests</div></div>
     <div class="tile"><div class="k">Total pots</div>
       <div class="v">${fmtMoney(pots)}</div>
-      <div class="s">four contests</div></div>`;
+      <div class="s">four contests</div></div>`);
 }
 
 function renderStrip(R) {
-  $("conStrip").innerHTML = CONTEST_KEYS.map(c => {
+  const html = CONTEST_KEYS.map(c => {
     const b = R.base[c]; if (!b) return "";
     return `<button class="scard" data-c="${c}">
       <div class="nm">${esc(CONTESTS[c].name)}</div>
@@ -1174,7 +1189,7 @@ function renderStrip(R) {
         <span class="al">${survivedWeek(c, b)}/${b.Min0} surviving · field ${fmtN(b.F)}</span></div>
     </button>`;
   }).join("");
-  $("conStrip").querySelectorAll(".scard").forEach(el => el.onclick = () => {
+  if (setHtml($("conStrip"), html)) $("conStrip").querySelectorAll(".scard").forEach(el => el.onclick = () => {
     tab = el.dataset.c; try { localStorage.setItem("gamedayTab", tab); } catch (e) {} render();
   });
 }
@@ -1198,8 +1213,8 @@ function wireSort(head, s, rerender) {
 }
 /* Results are sourced exclusively from the ESPN feed — the team chip is display only. */
 function resBtn(g, t, res) {
-  const on = res === t;
-  return `<span class="res ${on ? "on" : ""}"${on ? ` title="${NAMES[t]} won"` : ""}>${logo(t)} ${t}</span>`;
+  const won = res === t, lost = res && res !== t;
+  return `<span class="res ${won ? "on" : lost ? "no" : ""}"${won ? ` title="${NAMES[t]} won"` : lost ? ` title="${NAMES[t]} lost"` : ""}>${logo(t)} ${t}</span>`;
 }
 function levTxt(oPct, fPct) {
   if (fPct == null) return { txt: "—", cls: "s2" };
@@ -1267,10 +1282,11 @@ function top5Html(R, R0, contest) {
  * so mixed counts and percentages mislead. Counts live on each contest's own tab. ---- */
 function renderRooting(R) {
   const th2 = (full, sm) => `<span class="th-full">${full}</span><span class="th-sm">${sm}</span>`;
-  $("rootHead").innerHTML = `<tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
+  renderRooting._R = R;
+  const headChanged = setHtml($("rootHead"), `<tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
     <th class="num sortable" data-k="wp">${th2("Win %", "Win")}${sortArrow(mainSort, "wp")}</th>
     ${CONTEST_KEYS.map(c => `<th class="num sortable" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
-    <th class="num sortable" data-k="total">${th2("Total", "Tot")}${sortArrow(mainSort, "total")}</th></tr>`;
+    <th class="num sortable" data-k="total">${th2("Total", "Tot")}${sortArrow(mainSort, "total")}</th></tr>`);
   const teamRows = [];
   let anyData = false;
   for (const { g, k, settled, dTot, per } of R.games) {
@@ -1319,8 +1335,8 @@ function renderRooting(R) {
       <td class="num"><b>${totCell}</b></td>
     </tr>`;
   }).join("");
-  $("rootBody").innerHTML = rows || `<tr><td colspan="${3 + CONTEST_KEYS.length}" class="empty">no games this week</td></tr>`;
-  wireSort($("rootHead"), mainSort, () => renderRooting(R));
+  setHtml($("rootBody"), rows || `<tr><td colspan="${3 + CONTEST_KEYS.length}" class="empty">no games this week</td></tr>`);
+  if (headChanged) wireSort($("rootHead"), mainSort, () => renderRooting(renderRooting._R));
 }
 
 function renderContestView(c, b) {
@@ -1377,7 +1393,7 @@ function renderContestView(c, b) {
     </tr>`;
   }).join("");
 
-  cv.innerHTML = `<div class="panel">
+  const cvHtml = `<div class="panel">
     <div class="chead">
       <div><h2>${esc(C.name)}</h2>
         <div class="meta">${legLabels} · pot ${fmtMoney(b.pot)} <span class="s2">(${potNote})</span></div></div>
@@ -1421,24 +1437,27 @@ function renderContestView(c, b) {
       <details data-id="picks-${c}"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
       <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>`}
   </div>`;
-  trackDetails(cv);
-  cv.querySelectorAll("textarea.impbox").forEach(t => { if (keepPaste[t.dataset.c]) t.value = keepPaste[t.dataset.c]; });
-  cv.querySelectorAll(".subtabs button").forEach(btn => btn.onclick = () => {
-    subTab = btn.dataset.s; render();
-  });
-  if (subTab === "entries") {
-    const se = $("entSearch");
-    se.oninput = () => { entQuery = se.value; renderEntList(c, b); };
-    $("entMineBtn").onclick = () => {
-      entMine = !entMine;
-      $("entMineBtn").className = "btn " + (entMine ? "on" : "");
-      renderEntList(c, b);
-    };
-    renderEntList(c, b);
-  } else {
-    wireSort($("cHead"), boardSort, render);
-    wireContestView(c);
+  renderContestView._b = b;
+  if (setHtml(cv, cvHtml)) {
+    trackDetails(cv);
+    cv.querySelectorAll("textarea.impbox").forEach(t => { if (keepPaste[t.dataset.c]) t.value = keepPaste[t.dataset.c]; });
+    cv.querySelectorAll(".subtabs button").forEach(btn => btn.onclick = () => {
+      subTab = btn.dataset.s; render();
+    });
+    if (subTab === "entries") {
+      const se = $("entSearch");
+      se.oninput = () => { entQuery = se.value; renderEntList(c, renderContestView._b); };
+      $("entMineBtn").onclick = () => {
+        entMine = !entMine;
+        $("entMineBtn").className = "btn " + (entMine ? "on" : "");
+        renderEntList(c, renderContestView._b);
+      };
+    } else {
+      wireSort($("cHead"), boardSort, render);
+      wireContestView(c);
+    }
   }
+  if (subTab === "entries") renderEntList(c, b);   // entries list keeps its own change guard
 }
 
 /* ---- Entries sub-tab: every entry's selection, sortable, searchable, my-entries filter ---- */
@@ -1486,14 +1505,15 @@ function renderEntList(c, b) {
     }).join("");
     return `<tr class="${r.mine ? "mineRow" : ""}"><td>${esc(r.n)}</td>${cells}</tr>`;
   }).join("");
-  el.innerHTML = `<table class="games"><thead>
+  renderEntList._cb = { c, b };
+  const changed = setHtml(el, `<table class="games"><thead>
     <tr><th class="sortable" data-k="name">Entry${arrow("name")}</th>${legTh}</tr>
-  </thead><tbody>${body}</tbody></table>`;
+  </thead><tbody>${body}</tbody></table>`);
   $("entCount").textContent = (shown.length < total ? `showing ${fmtN(shown.length)} of ` : "") + `${fmtN(total)} entries`;
-  el.querySelectorAll("th.sortable").forEach(th => th.onclick = () => {
+  if (changed) el.querySelectorAll("th.sortable").forEach(th => th.onclick = () => {
     const k = th.dataset.k;
     if (entSort.key === k) entSort.dir = -entSort.dir; else entSort = { key: k, dir: 1 };
-    renderEntList(c, b);
+    renderEntList(renderEntList._cb.c, renderEntList._cb.b);
   });
 }
 
@@ -1532,7 +1552,7 @@ function setupHtml(c) {
     <label>Our entry names <span class="s2">(one per line, exactly as they appear in the contest)</span>
       <textarea class="nms" data-c="${c}" rows="4">${esc((state.names[c] || []).join("\n"))}</textarea></label>
     <div>
-      <label>Field size <span class="s2">(fallback until a week-1 import)</span>
+      <label>Field size <span class="s2">(manual override — wins over imports; blank = use the import)</span>
         <input class="cell szin" data-c="${c}" value="${Number(state.sizes[c]) || ""}" placeholder="${C.defaultN}"></label>
       <label>Pot override <span class="s2">($; blank = ${C.potFixed ? fmtMoney(C.potFixed) + " guaranteed" : "fee × entries"})</span>
         <input class="cell potin" data-c="${c}" value="${Number(state.money.pots[c]) || ""}" placeholder="${C.potFixed || feeOf(c) * (Number(state.sizes[c]) || C.defaultN)}"></label>
