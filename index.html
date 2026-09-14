@@ -1709,7 +1709,7 @@ function renderContestView(c, b) {
         <th class="num sortable mh" data-k="fieldpct"><span class="th-full">Field %</span><span class="th-sm">F%</span>${sortArrow(boardSort, "fieldpct")}</th>
         <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th>
         <th class="num sortable mh" data-k="sod"><span class="th-full">Start of day</span><span class="th-sm">SOD</span>${sortArrow(boardSort, "sod")}</th>
-        <th class="num sortable" data-k="cur"><span class="th-full">Current</span><span class="th-sm">Now</span>${sortArrow(boardSort, "cur")}</th>
+        <th class="num sortable" data-k="cur"><span class="th-full">Worth Now</span><span class="th-sm">Now</span>${sortArrow(boardSort, "cur")}</th>
         <th class="num sortable" data-k="root"><span class="th-full">Root for?</span><span class="th-sm">Root</span>${sortArrow(boardSort, "root")}</th></tr>
       </thead><tbody id="cGames">${gameRows}${(() => {
         const np = noPickInfo(c, b);
