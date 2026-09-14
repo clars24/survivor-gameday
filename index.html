@@ -655,6 +655,59 @@ function fieldAliveEntering(c, i) {
   }
   return { n, exact, src };
 }
+/** Field entries ENTERING week-start leg i, anchored strictly BEFORE this week's import (manual size,
+ *  else the newest earlier import), stepped through results. This count still contains the people who
+ *  then failed to submit — which is exactly what the No Pick row needs. Null when nothing earlier exists. */
+function fieldPrevEntering(c, i) {
+  const legs = CONTESTS[c].legs;
+  const manual = Number(state.sizes[c]);
+  let j = -1, n;
+  if (manual > 0) { n = manual; j = 0; }
+  else {
+    for (let k = i - 1; k >= 0; k--) {
+      const fd = state.field[c][legs[k].id];
+      if (fd && fd.alive > 0) { j = k; break; }
+    }
+    if (j < 0) return null;
+    n = Number(state.field[c][legs[j].id].alive);
+  }
+  for (; j < i; j++) {
+    const leg = legs[j], fd = state.field[c][leg.id];
+    if (!fd || !(fd.alive > 0)) continue;
+    let surv = 1, lost = 0;
+    for (const g of leg.games) {
+      const w = winnerOf(g, null);
+      if (!w) continue;
+      const sA = (fd.own[g.away] || 0) / fd.alive, sH = (fd.own[g.home] || 0) / fd.alive;
+      const share = w === "TIE" ? sA + sH : w === g.home ? sA : sH;
+      if (leg.picks > 1) surv *= Math.max(0, 1 - share); else lost += share;
+    }
+    n *= leg.picks > 1 ? surv : Math.max(0, 1 - lost);
+  }
+  return { n };
+}
+
+/** The No Pick row: alive entries that submitted nothing this week (eliminated). Field = previous
+ *  survivors minus this week's pick count; ours = alive-entering entries missing a pick on an
+ *  imported leg. Null until this week's field import exists. */
+function noPickInfo(c, b) {
+  const leg0 = b.legs[0], i0 = legIndex(c, leg0.id);
+  const fd = state.field[c][leg0.id];
+  if (!fd || !(fd.alive > 0)) return null;
+  const prev = fieldPrevEntering(c, i0);
+  const field = prev && prev.n > 0 ? Math.max(0, Math.round(prev.n - Number(fd.alive))) : null;
+  let ours = 0;
+  for (const n of (state.names[c] || [])) {
+    if (!myEntryAliveUpTo(c, n, i0, null)) continue;
+    for (const leg of b.legs) {
+      const lfd = state.field[c][leg.id];
+      if (!lfd || !(lfd.alive > 0)) continue;
+      if (pickTeams((state.mine[c][n] || {})[leg.id]).length < leg.picks) { ours++; break; }
+    }
+  }
+  return { ours, field, prevN: prev ? prev.n : null, oursPct: b.Min0 ? 100 * ours / b.Min0 : 0 };
+}
+
 function contestWeekEV(c, w, hyp) {
   const legs = legsForWeek(c, w);
   if (!legs.length) return null;
@@ -1486,7 +1539,19 @@ function renderContestView(c, b) {
         <th class="num sortable" data-k="field">Field${sortArrow(boardSort, "field")}</th>
         <th class="num sortable" data-k="fieldpct"><span class="th-full">Field %</span><span class="th-sm">F%</span>${sortArrow(boardSort, "fieldpct")}</th>
         <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th></tr>
-      </thead><tbody id="cGames">${gameRows}</tbody></table></div>
+      </thead><tbody id="cGames">${gameRows}${(() => {
+        const np = noPickInfo(c, b);
+        if (!np) return "";
+        return `<tr class="lost">
+          <td class="match"><span class="res no">No Pick</span><span class="oppn">eliminated — no selection</span></td>
+          <td class="num s">0%</td>
+          <td class="num ${np.ours ? "olose" : ""}">${np.ours || ""}</td>
+          <td class="num s">${np.ours ? np.oursPct.toFixed(1) + "%" : ""}</td>
+          <td class="num ${np.field ? "olose" : ""}">${np.field == null ? "—" : fmtN(np.field)}</td>
+          <td class="num s">${np.field != null && np.prevN > 0 ? (100 * np.field / np.prevN).toFixed(1) + "%" : "—"}</td>
+          <td class="num s2">—</td>
+        </tr>`;
+      })()}</tbody></table></div>
       <details data-id="picks-${c}"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
       <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>`}
   </div>`;
