@@ -67,10 +67,11 @@
   .banner { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--warn);
     border-radius: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--ink-2); margin: 0 0 14px; }
 
-  .root5 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
-  .root5.r5now { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .root5 { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none; margin: 0 0 14px; }
   .root5::-webkit-scrollbar { display: none; }
   .r5chip, .r5label { flex: 0 0 auto; }
+  .r5label { max-width: 128px; line-height: 1.12; }   /* the label wraps, the chips never do */
   .r5label { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; text-transform: uppercase;
     letter-spacing: .05em; color: var(--ink-3); font-weight: 600; font-size: 15px; }
   .r5chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card);
@@ -94,8 +95,8 @@
     line-height: 1.1; margin-top: 3px; font-variant-numeric: tabular-nums; }
   .tile .v.money { color: var(--money); }
   .tile .s { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
-  .potrow { display: grid; grid-template-columns: 1fr auto auto; gap: 0 14px; font-size: 11.5px;
-    margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .potrow { display: grid; grid-template-columns: max-content max-content max-content; justify-content: start;
+    gap: 0 18px; font-size: 11.5px; margin-top: 2px; font-variant-numeric: tabular-nums; }
   .potrow span:first-child { color: var(--ink-3); }
   .potrow span { text-align: right; }
   .potrow span:first-child { text-align: left; }
