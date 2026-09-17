@@ -39,6 +39,7 @@
   .brand { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-weight: 700;
     font-size: 30px; line-height: 1; letter-spacing: .01em; text-transform: uppercase; }
   .brand .yr { color: var(--money); }
+  .wkbadge:empty { visibility: hidden; }
   .wkbadge { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-weight: 600; font-size: 17px;
     text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2);
     border: 1px solid var(--border); border-radius: 999px; padding: 2px 12px; }
@@ -260,7 +261,7 @@
 <div class="wrap">
   <header>
     <div class="brand">Survivor Gameday <span class="yr">'26</span></div>
-    <span class="wkbadge" id="wkBadge">Week 1</span>
+    <span class="wkbadge" id="wkBadge"></span>
     <div class="htools">
       <span id="shareChip">connecting…</span>
       <button class="btn" id="btnExport">Export</button>
@@ -460,6 +461,19 @@ function parseEntryRows(text, defaultLeg, contest) {
   const rows = [], SEL = /^(\d+)\.\s+([A-Z0-9''-]+)\b/i;
   const legIds = new Set(CONTESTS[contest].legs.map(l => l.id));
   let pending = null;
+  // Splash's own CSV export: "User Name,Entry Number,Status,Week N" — entry = user-number,
+  // the leg comes from the header, blank picks are skipped (they show as no-pick)
+  const splashHead = lines[0] && lines[0].match(/^user name\s*,\s*entry number\s*,\s*status\s*,\s*week\s+(\d+)/i);
+  if (splashHead) {
+    const leg = "W" + splashHead[1];
+    for (const raw of lines.slice(1)) {
+      const p = raw.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(x => x.replace(/^"|"$/g, "").trim());
+      if (p.length < 4) continue;
+      const team = teamTok(p[3]);
+      if (team) rows.push({ entry: p[0] + "-" + p[1], leg, pick: team });
+    }
+    return rows;
+  }
   for (const raw of lines) {
     const parts = raw.split(/\t|,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(x => x.replace(/^"|"$/g, "").trim());
     if (parts.length >= 3 && legIds.has(parts[1].toUpperCase()) && teamTok(parts[2])) {
