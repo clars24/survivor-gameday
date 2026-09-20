@@ -1606,7 +1606,7 @@ function top5Html(R, R0, contest) {
   };
   const row = (label, list, marks, cls) => list.length
     ? `<div class="root5${cls ? " " + cls : ""}"><span class="r5label">${label}</span>` + list.map((x, i) => chip(x, i, marks)).join("") + `</div>` : "";
-  const out = row("Top 5 rooting interests — now", now, false, "r5now") + row("Top 5 rooting interests — start of day", day, true);
+  const out = row("Top 5 rooting interests — now", now, false, "r5now") + row("Top 5 rooting interests — start of week", day, true);
   return out || `<div class="root5"><span class="r5label">Top 5 to root for</span>
     <span class="s2">appears once entry names and this week's picks are loaded — nothing is worth money yet</span></div>`;
 }
@@ -1629,7 +1629,7 @@ function renderRooting(R, R0) {
     <tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
     <th class="num sortable mh" data-k="wp">${th2("Win %", "Win")}${sortArrow(mainSort, "wp")}</th>
     ${CONTEST_KEYS.map(c => `<th class="num sortable mh" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
-    <th class="num sortable" data-k="sodt">${th2("Start of day", "SOD")}${sortArrow(mainSort, "sodt")}</th>
+    <th class="num sortable" data-k="sodt">${th2("Start of week", "SOW")}${sortArrow(mainSort, "sodt")}</th>
     <th class="num sortable" data-k="total">${th2("Worth Now", "Now")}${sortArrow(mainSort, "total")}</th>
     <th class="num sortable" data-k="root">${th2("Root for?", "Root")}${sortArrow(mainSort, "root")}</th></tr>`);
   const teamRows = [];
@@ -1908,7 +1908,7 @@ function renderContestView(c, b) {
         <th class="num sortable" data-k="field">Field${sortArrow(boardSort, "field")}</th>
         <th class="num sortable mh" data-k="fieldpct"><span class="th-full">Field %</span><span class="th-sm">F%</span>${sortArrow(boardSort, "fieldpct")}</th>
         <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th>
-        <th class="num sortable mh" data-k="sod"><span class="th-full">Start of day</span><span class="th-sm">SOD</span>${sortArrow(boardSort, "sod")}</th>
+        <th class="num sortable mh" data-k="sod"><span class="th-full">Start of week</span><span class="th-sm">SOW</span>${sortArrow(boardSort, "sod")}</th>
         <th class="num sortable" data-k="cur"><span class="th-full">Worth Now</span><span class="th-sm">Now</span>${sortArrow(boardSort, "cur")}</th>
         <th class="num sortable" data-k="root"><span class="th-full">Root for?</span><span class="th-sm">Root</span>${sortArrow(boardSort, "root")}</th></tr>
       </thead><tbody id="cGames">${gameRows}${(() => {
