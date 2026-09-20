@@ -1388,10 +1388,27 @@ function saveMkt() {
   } catch (e) {}
 }
 
+let paintHold = null;   // non-null-then-true while the cold-start line fetch is in flight
 function render() {
   normalizeState();
   week = autoWeek();
   restoreMkt();
+  // A device with no cached lines yet (first visit) would paint one model-priced frame and
+  // then visibly re-price when the poll lands. Hold the very first paint until the lines
+  // arrive — bounded, so a dead feed still paints on the model within 2.5s.
+  if (paintHold === null) {
+    const haveMkt = SCHEDULE.some(g => g.week === week && live.games[gameKey(g)] && live.games[gameKey(g)].mkt != null);
+    const pending = SCHEDULE.some(g => g.week === week && !resultOf(g));
+    if (!haveMkt && pending) {
+      paintHold = true;
+      const done = () => { if (paintHold) { paintHold = false; render(); } };
+      livePoll(true).then(done, done);
+      setTimeout(done, 2500);
+      return;
+    }
+    paintHold = false;
+  }
+  if (paintHold) return;
   // the boot poll can fire before the data pull settles the real week — chase it immediately
   // instead of pricing off the model until the next 60s tick
   if (livePollWeek !== week) livePoll(true);
