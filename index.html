@@ -1001,6 +1001,19 @@ function contestWeekEV(c, w, hyp) {
     noNames: !names.length
   };
 }
+/* A game's $ swing for a contest is unknowable while the field's picks there are hidden —
+ * we could even be underowned and rooting the other way. Reveal rule matches scenarioEV:
+ * an import covers a game once it has started or lists either team. */
+function fieldHiddenFor(c, w, g) {
+  const leg = legsForWeek(c, w).find(l => l.games.some(x => x === g));
+  if (!leg) return false;
+  const fd = state.field[c][leg.id];
+  if (fd && fd.alive > 0) {
+    const l = live.games[gameKey(g)];
+    if ((l && l.state && l.state !== "pre") || fd.own[g.away] != null || fd.own[g.home] != null) return false;
+  }
+  return true;
+}
 function rootingGuide(w) {
   const base = {};
   for (const c of CONTEST_KEYS) base[c] = contestWeekEV(c, w, null);
@@ -1017,10 +1030,14 @@ function rootingGuide(w) {
         if (!eh || !ea) continue;
         // EXPECTED EV difference: this game forced each way, every other pending game weighted by its
         // win probability. Low-owned teams price correctly — conditional on them winning, the rest of
-        // the field is expected to thin around you.
-        const d = eh.evExp - ea.evExp;
-        per.push({ c, d });
-        dTot += d;
+        // the field is expected to thin around you. A hidden-ownership game reports no swing (the
+        // number would be pure prior), but must-win detection below still runs — dead is dead
+        // whatever the field did.
+        if (!fieldHiddenFor(c, w, g)) {
+          const d = eh.evExp - ea.evExp;
+          per.push({ c, d });
+          dTot += d;
+        }
         // survival-critical: alive in this contest now, but one outcome kills every entry we have
         // left (and no cohort split rescues the money) — that game outranks any $ swing
         if (base[c] && base[c].M > 0) {
