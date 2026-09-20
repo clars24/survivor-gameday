@@ -784,11 +784,18 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   const baseDead = new Array(nL).fill(0);   // single-pick legs: additive lost share
   const baseSurv = new Array(nL).fill(1);   // multi-pick legs: multiplicative survival
   const pend = new Map();                   // gameKey -> pending game info
+  const hidden = [];                        // games whose field ownership is not visible yet
+  const gameStarted = g => { const l = live.games[gameKey(g)]; return !!(l && l.state && l.state !== "pre"); };
   legs.forEach((leg, li) => {
     const fd = state.field[c][leg.id], haveOwn = !!(fd && fd.alive > 0), multi = leg.picks > 1;
     for (const g of leg.games) {
-      const sA = haveOwn ? (fd.own[g.away] || 0) / fd.alive : 0;
-      const sH = haveOwn ? (fd.own[g.home] || 0) / fd.alive : 0;
+      // ownership reveals in waves as games lock: with an import in hand, a game that has
+      // started (or appears in the import) is revealed — absent teams there really are 0.
+      // A not-yet-started game missing from the import is simply hidden, not zero-owned.
+      const revealed = haveOwn && (gameStarted(g) || fd.own[g.away] != null || fd.own[g.home] != null);
+      if (!revealed) hidden.push({ g, li, multi, legId: leg.id });
+      const sA = revealed ? (fd.own[g.away] || 0) / fd.alive : 0;
+      const sH = revealed ? (fd.own[g.home] || 0) / fd.alive : 0;
       const wnr = winnerOf(g, hyp);
       if (wnr) {
         const dead = wnr === "TIE" ? sA + sH : wnr === g.home ? sA : sH;
@@ -821,6 +828,26 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
     const key = req.map(r => r.k + (r.home ? "H" : "A")).sort().join("|");
     const s = sigs.get(key);
     if (s) s.cnt++; else sigs.set(key, { cnt: 1, req });
+  }
+  // Hidden games: the field can't stay immortal there while our picks sweat. Until that
+  // game's ownership wave lands, thin the field by our own book's PREGAME expected dead
+  // share for the game — a fixed prior, deliberately blind to results, hypotheticals and
+  // live probabilities, so conditional moves flow through our side only and the baseline
+  // share stays sensible.
+  if (entries.length && hidden.length) {
+    const dm = DAY_MODE; DAY_MODE = true;
+    try {
+      for (const h of hidden) {
+        let lost = 0;
+        for (const n of entries) {
+          for (const t of pickTeams((state.mine[c][n] || {})[h.legId])) {
+            if (gameOfTeam(legs[h.li], t) === h.g) lost += 1 - winP(t, h.g);
+          }
+        }
+        const d = Math.min(0.999999, lost / entries.length);
+        if (d > 0) { if (h.multi) baseSurv[h.li] *= 1 - d; else baseDead[h.li] += d; }
+      }
+    } finally { DAY_MODE = dm; }
   }
 
   const games = [...pend.values()];
