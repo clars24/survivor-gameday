@@ -1389,6 +1389,25 @@ async function poolRestore() {
   if (got && !glue.onFirstData) render();   // during boot the first-data paint covers it
 }
 
+/* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
+ * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
+ * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
+const BUILD_ID = "1789924843390";
+let buildCheckAt = 0;
+async function checkBuild() {
+  if (Date.now() - buildCheckAt < 240000) return;
+  buildCheckAt = Date.now();
+  try {
+    const r = await fetch("index.html?ck=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    const m = (await r.text()).match(/BUILD_ID = "(\d+)"/);
+    if (m && m[1] !== BUILD_ID) location.reload();
+  } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkBuild(); });
+setInterval(() => { if (document.hidden) checkBuild(); }, 600000);
+setTimeout(checkBuild, 8000);
+
 /* ============================== VIEWS ============================== */
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
