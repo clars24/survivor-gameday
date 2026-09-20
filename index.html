@@ -84,10 +84,10 @@
   .r5chip.lose b { text-decoration: line-through; }
   .r5m.win { color: var(--money); font-weight: 700; }
   .r5m.lose { color: var(--bad); font-weight: 700; }
-  .r5chip.mustwin { border-color: var(--bad); }
+  .r5chip.mustwin { border-color: #aeb6c4; }
   .r5mw, .mwtag { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; text-transform: uppercase;
-    letter-spacing: .06em; color: var(--bad); font-weight: 700; font-size: 11px;
-    border: 1px solid var(--bad); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+    letter-spacing: .06em; color: #c8cfda; font-weight: 700; font-size: 11px;
+    border: 1px solid #aeb6c4; border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
   .root5 + .root5 { margin-top: -6px; }
   .root5.r5now { border: 1px solid var(--gold); border-radius: 12px; padding: 7px 12px; }
   .root5.r5now + .root5 { margin-top: 0; }
@@ -283,8 +283,8 @@
     <div class="strip" id="conStrip"></div>
     <div class="panel">
       <h2>This week — what each result is worth</h2>
-      <div class="sub">Expected $ swing per contest if the team wins vs loses, with every other pending game
-        weighted by its win probability · results and Win % update automatically from the live feed
+      <div class="sub">Expected $ swing per contest if the team wins vs loses, priced across every scenario of
+        the other pending games · results and Win % update automatically from the live feed
         (in-game probability, else the market line, else the model)</div>
       <div style="overflow-x:auto"><table class="games even" id="rootTable"><thead id="rootHead"></thead><tbody id="rootBody"></tbody></table></div>
     </div>
@@ -294,7 +294,8 @@
 
   <footer>
     EV is pro-rata: pot × our alive entries ÷ field alive entries — each pot goes to the furthest-surviving
-    cohort, split evenly. This page prices the current week only.
+    cohort, split evenly. Expected values weigh every scenario of the week's remaining games; the page prices
+    the current week only.
   </footer>
 </div>
 
@@ -771,6 +772,115 @@ function noPickInfo(c, b) {
   return { ours, field, prevN: prev ? prev.n : null, oursPct: b.Min0 ? 100 * ours / b.Min0 : 0 };
 }
 
+/* Scenario-weighted expected EV: E[pot × M/F] over every branch of this week's undecided
+ * games — NOT pot × E[M]/E[F]. The ratio of expectations misses exactly the scenarios that
+ * make a low-owned pick valuable: we survive while the field's big blocks die and 1/F
+ * explodes. Games we're on are always enumerated (that correlation is the whole point);
+ * field-only games join largest-share first up to 12 total (4096 branches), and the
+ * leftovers fold in at expected survival — exact in the numerator, sub-dollar noise in the
+ * denominator at those share sizes. */
+function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
+  const nL = legs.length;
+  const baseDead = new Array(nL).fill(0);   // single-pick legs: additive lost share
+  const baseSurv = new Array(nL).fill(1);   // multi-pick legs: multiplicative survival
+  const pend = new Map();                   // gameKey -> pending game info
+  legs.forEach((leg, li) => {
+    const fd = state.field[c][leg.id], haveOwn = !!(fd && fd.alive > 0), multi = leg.picks > 1;
+    for (const g of leg.games) {
+      const sA = haveOwn ? (fd.own[g.away] || 0) / fd.alive : 0;
+      const sH = haveOwn ? (fd.own[g.home] || 0) / fd.alive : 0;
+      const wnr = winnerOf(g, hyp);
+      if (wnr) {
+        const dead = wnr === "TIE" ? sA + sH : wnr === g.home ? sA : sH;
+        if (multi) baseSurv[li] *= Math.max(0, 1 - dead); else baseDead[li] += dead;
+        continue;
+      }
+      const k = gameKey(g);
+      let e = pend.get(k);
+      if (!e) { e = { g, k, p: winP(g.home, g), at: [], ours: false }; pend.set(k, e); }
+      e.at.push({ li, sA, sH, multi });
+    }
+  });
+
+  // our entries grouped by pick signature over the pending games (settled picks resolve now)
+  const sigs = new Map();
+  for (const n of entries) {
+    let dead = false; const req = [];
+    for (const leg of legs) {
+      for (const t of pickTeams((state.mine[c][n] || {})[leg.id])) {
+        const g = gameOfTeam(leg, t);
+        if (!g) { dead = true; break; }
+        const wnr = winnerOf(g, hyp);
+        if (wnr) { if (wnr !== t) { dead = true; break; } }
+        else req.push({ k: gameKey(g), home: t === g.home });
+      }
+      if (dead) break;
+    }
+    if (dead) continue;
+    for (const r of req) pend.get(r.k).ours = true;
+    const key = req.map(r => r.k + (r.home ? "H" : "A")).sort().join("|");
+    const s = sigs.get(key);
+    if (s) s.cnt++; else sigs.set(key, { cnt: 1, req });
+  }
+
+  const games = [...pend.values()];
+  const wt = e => Math.max(...e.at.map(a => Math.max(a.sA, a.sH)));
+  games.sort((a, b) => (b.ours - a.ours) || (wt(b) - wt(a)));
+  const en = games.slice(0, 12);
+  for (const e of games.slice(12)) {
+    for (const a of e.at) {
+      const eDead = a.sA * e.p + a.sH * (1 - e.p);   // away pickers die when home wins
+      if (a.multi) baseSurv[a.li] *= Math.max(0, 1 - eDead); else baseDead[a.li] += eDead;
+    }
+  }
+  const bit = new Map(en.map((e, i) => [e.k, i]));
+  const sigList = [];
+  for (const { cnt, req } of sigs.values()) {
+    let mask = 0, want = 0, fold = 1, ok = true;
+    for (const r of req) {
+      const b = bit.get(r.k);
+      if (b == null) { const e = pend.get(r.k); fold *= r.home ? e.p : 1 - e.p; }
+      else {
+        const m = 1 << b;
+        if ((mask & m) && (((want & m) !== 0) !== r.home)) { ok = false; break; }
+        mask |= m; if (r.home) want |= m;
+      }
+    }
+    if (ok && fold > 0) sigList.push({ mask, want, val: cnt * fold });
+  }
+
+  let ev = 0;
+  const dead = baseDead.slice(), surv = baseSurv.slice();
+  const walk = (i, pr, winMask) => {
+    if (pr < 1e-12) return;
+    if (i === en.length) {
+      let F = Fin0;
+      for (let li = 0; li < nL; li++) F *= legs[li].picks > 1 ? surv[li] : Math.max(0, 1 - dead[li]);
+      let M = 0;
+      for (const s of sigList) if ((winMask & s.mask) === s.want) M += s.val;
+      if (M > 1e-9) ev += pr * pot * M / Math.max(F, M);
+      // whole field dies with us on the same slate: cohort split among everyone entering
+      else if (F < 0.5 && Min0 > 0) ev += pr * pot * Min0 / Math.max(Fin0, 1);
+      return;
+    }
+    const e = en[i];
+    for (const side of [1, 0]) {          // 1 = home wins, 0 = away wins
+      const p2 = side ? e.p : 1 - e.p;
+      if (p2 <= 0) continue;
+      const undo = [];
+      for (const a of e.at) {
+        const d = side ? a.sA : a.sH;
+        if (a.multi) { undo.push([a.li, surv[a.li], 1]); surv[a.li] *= Math.max(0, 1 - d); }
+        else { undo.push([a.li, dead[a.li], 0]); dead[a.li] += d; }
+      }
+      walk(i + 1, pr * p2, side ? (winMask | (1 << i)) : winMask);
+      for (const [li, v, m] of undo) { if (m) surv[li] = v; else dead[li] = v; }
+    }
+  };
+  walk(0, 1, 0);
+  return ev;
+}
+
 function contestWeekEV(c, w, hyp) {
   const legs = legsForWeek(c, w);
   if (!legs.length) return null;
@@ -779,6 +889,7 @@ function contestWeekEV(c, w, hyp) {
   const pot = potOf(c);
   const names = state.names[c] || [];
   let aliveNames = names.filter(n => myEntryAliveUpTo(c, n, i0, hyp));
+  const entering = aliveNames;   // snapshot for the scenario pricer — the leg loop reassigns
   const Min0 = aliveNames.length, Fin0 = Math.max(fld.n, Min0);
 
   let F = Fin0, M = Min0, cohortEV = null, cohortLeg = null;
@@ -856,7 +967,7 @@ function contestWeekEV(c, w, hyp) {
   const byTeam = {};
   for (const r of rows) byTeam[r.team] = r;
   const evNow = cohortEV != null ? cohortEV : (M > 0 ? pot * M / Math.max(F, M) : 0);
-  const evExp = cohortEV != null ? cohortEV : (eM > 0 ? pot * eM / Math.max(eF, eM) : 0);
+  const evExp = cohortEV != null ? cohortEV : scenarioEV(c, legs, hyp, entering, Fin0, Min0, pot);
   return {
     contest: c, legs, pot, src: fld.src, exact: fld.exact && !missingField.length,
     Fin0, Min0, F, M, eF, eM, evNow, evExp, cohortLeg, rows, byTeam, missingField,
@@ -891,12 +1002,9 @@ function rootingGuide(w) {
         }
       }
     }
-    const mustT = must[g.home] ? g.home : must[g.away] ? g.away : null;
-    out.push({ g, k, settled, dTot, per, must, root: mustT || (dTot >= 0 ? g.home : g.away) });
+    out.push({ g, k, settled, dTot, per, must, root: dTot >= 0 ? g.home : g.away });
   }
-  out.sort((a, b) => (a.settled - b.settled)
-    || ((Object.keys(b.must).length ? 1 : 0) - (Object.keys(a.must).length ? 1 : 0))
-    || (Math.abs(b.dTot) - Math.abs(a.dTot)));
+  out.sort((a, b) => (a.settled - b.settled) || (Math.abs(b.dTot) - Math.abs(a.dTot)));
   return { games: out, base };
 }
 function autoWeek() {
@@ -1425,8 +1533,9 @@ function top5List(R, contest) {
       let v;
       if (contest) { const p = per.find(x => x.c === contest); v = p ? p.d * sign : 0; }
       else v = dTot * sign;
-      // a loss that would eliminate our last alive entries is always #1, whatever the $ swing
-      const mw = !!(must && must[t] && (!contest || must[t].includes(contest)));
+      // a loss that would eliminate our last alive entries in THIS contest is always #1, whatever
+      // the $ swing — but only on that contest's own list; total equity survives it elsewhere
+      const mw = !!(contest && must && must[t] && must[t].includes(contest));
       if (v > 0.5 || mw) list.push({ t, v, g, mw });
     }
   }
@@ -1490,7 +1599,6 @@ function renderRooting(R, R0) {
       const perT = {};
       for (const p of per) perT[p.c] = p.d * sign;
       teamRows.push({ t, g, k, settled, res, mine, fCnt, perT, sodTot: sodT[t],
-        mw: !settled && !!(must && must[t]),
         swing: settled ? null : dTot * sign, wp: winP(t, g) });
     }
   }
@@ -1502,11 +1610,7 @@ function renderRooting(R, R0) {
       let av, bv;
       if (mainSort.key === "wp") { av = a.wp; bv = b.wp; }
       else if (mainSort.key === "sodt") { av = a.sodTot; bv = b.sodTot; }
-      else if (mainSort.key === "total" || mainSort.key === "root") {
-        // survival-critical rows stay on top of the money sort — dead is dead, whatever the $
-        if (a.mw !== b.mw) return b.mw - a.mw;
-        av = a.settled ? null : a.swing; bv = b.settled ? null : b.swing;
-      }
+      else if (mainSort.key === "total" || mainSort.key === "root") { av = a.settled ? null : a.swing; bv = b.settled ? null : b.swing; }
       else { av = a.settled ? null : a.perT[mainSort.key]; bv = b.settled ? null : b.perT[mainSort.key]; }
       return cmpNum(av, bv, mainSort.dir) || (b.wp - a.wp);
     });
@@ -1528,8 +1632,7 @@ function renderRooting(R, R0) {
       <td class="num">${r.sodTot == null || isNaN(r.sodTot) || Math.abs(r.sodTot) < 0.5 ? `<span class="s2">—</span>`
         : `<span style="color:var(--ink-3);font-weight:600">${sw2(r.sodTot)}</span>`}</td>
       <td class="num"><b>${totCell}</b></td>
-      <td class="num">${r.mw ? `<span class="mwtag">MUST WIN</span>`
-        : r.settled || r.swing == null || Math.abs(r.swing) < 0.5 ? `<span class="s2">—</span>`
+      <td class="num">${r.settled || r.swing == null || Math.abs(r.swing) < 0.5 ? `<span class="s2">—</span>`
         : r.swing >= 0 ? `<span class="pos" style="font-weight:600">Win</span>` : `<span class="neg" style="font-weight:600">Loss</span>`}</td>
     </tr>`;
   }).join("");
