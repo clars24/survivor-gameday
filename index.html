@@ -208,11 +208,11 @@
   .lscore { color: var(--ink-3); font-size: 11.5px; margin-left: 6px; white-space: nowrap; }
   .th-sm, .m-sm { display: none; }
   .mo { display: none; }
-  /* phone LANDSCAPE: wide enough to show every column, too cramped for the long header
-   * text — swap just the header labels to their compact forms */
+  /* phone LANDSCAPE: wide enough to show every column, too cramped for long header text
+   * and exact dollar figures — swap headers AND money values to their compact forms */
   @media (max-height: 500px) and (pointer: coarse) {
-    .th-full { display: none; }
-    .th-sm { display: inline; }
+    .th-full, .m-full { display: none; }
+    .th-sm, .m-sm { display: inline; }
   }
   @media (max-width: 640px) {
     th.mo { display: table-cell; }
@@ -1408,7 +1408,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1789926602822";
+const BUILD_ID = "1789926754705";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
