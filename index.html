@@ -1533,10 +1533,12 @@ function top5List(R, contest) {
       let v;
       if (contest) { const p = per.find(x => x.c === contest); v = p ? p.d * sign : 0; }
       else v = dTot * sign;
-      // a loss that would eliminate our last alive entries in THIS contest is always #1, whatever
-      // the $ swing — but only on that contest's own list; total equity survives it elsewhere
-      const mw = !!(contest && must && must[t] && must[t].includes(contest));
-      if (v > 0.5 || mw) list.push({ t, v, g, mw });
+      // a loss that would eliminate our last alive entries in a contest is always #1, whatever the
+      // $ swing: everything that contest could earn from other games is conditional on this one.
+      // On the total list the badge names the contest, since overall equity survives it.
+      const mwc = !must ? null : contest ? (must[t] && must[t].includes(contest) ? [contest] : null) : must[t];
+      const mw = !!(mwc && mwc.length);
+      if (v > 0.5 || mw) list.push({ t, v, g, mw, mwc });
     }
   }
   list.sort((a, b) => (b.mw - a.mw) || (b.v - a.v));
@@ -1553,7 +1555,8 @@ function top5Html(R, R0, contest) {
       if (res === x.t) { mark = ` <span class="r5m win">✓</span>`; cls = " win"; }
       else if (res) { mark = ` <span class="r5m lose">✗</span>`; cls = " lose"; }
     }
-    return `<span class="r5chip${cls}${x.mw ? " mustwin" : ""}"><span class="rk">${i + 1}</span>${logo(x.t)} <b>${x.t}</b>${x.mw ? `<span class="r5mw">MUST WIN</span>` : ""}<span class="r5v">${sw2(x.v)}</span>${mark}</span>`;
+    const mwTxt = !x.mw ? "" : contest ? "MUST WIN" : x.mwc.map(c => CONTESTS[c].abbr).join("+") + " MUST WIN";
+    return `<span class="r5chip${cls}${x.mw ? " mustwin" : ""}"><span class="rk">${i + 1}</span>${logo(x.t)} <b>${x.t}</b>${x.mw ? `<span class="r5mw">${mwTxt}</span>` : ""}<span class="r5v">${sw2(x.v)}</span>${mark}</span>`;
   };
   const row = (label, list, marks, cls) => list.length
     ? `<div class="root5${cls ? " " + cls : ""}"><span class="r5label">${label}</span>` + list.map((x, i) => chip(x, i, marks)).join("") + `</div>` : "";
@@ -1599,6 +1602,7 @@ function renderRooting(R, R0) {
       const perT = {};
       for (const p of per) perT[p.c] = p.d * sign;
       teamRows.push({ t, g, k, settled, res, mine, fCnt, perT, sodTot: sodT[t],
+        mwc: settled ? null : must && must[t],
         swing: settled ? null : dTot * sign, wp: winP(t, g) });
     }
   }
@@ -1610,7 +1614,11 @@ function renderRooting(R, R0) {
       let av, bv;
       if (mainSort.key === "wp") { av = a.wp; bv = b.wp; }
       else if (mainSort.key === "sodt") { av = a.sodTot; bv = b.sodTot; }
-      else if (mainSort.key === "total" || mainSort.key === "root") { av = a.settled ? null : a.swing; bv = b.settled ? null : b.swing; }
+      else if (mainSort.key === "total" || mainSort.key === "root") {
+        // a contest's must-win game outranks any $ swing — other games' value there is conditional on it
+        if (!!a.mwc !== !!b.mwc) return (b.mwc ? 1 : 0) - (a.mwc ? 1 : 0);
+        av = a.settled ? null : a.swing; bv = b.settled ? null : b.swing;
+      }
       else { av = a.settled ? null : a.perT[mainSort.key]; bv = b.settled ? null : b.perT[mainSort.key]; }
       return cmpNum(av, bv, mainSort.dir) || (b.wp - a.wp);
     });
@@ -1632,7 +1640,8 @@ function renderRooting(R, R0) {
       <td class="num">${r.sodTot == null || isNaN(r.sodTot) || Math.abs(r.sodTot) < 0.5 ? `<span class="s2">—</span>`
         : `<span style="color:var(--ink-3);font-weight:600">${sw2(r.sodTot)}</span>`}</td>
       <td class="num"><b>${totCell}</b></td>
-      <td class="num">${r.settled || r.swing == null || Math.abs(r.swing) < 0.5 ? `<span class="s2">—</span>`
+      <td class="num">${r.mwc && r.mwc.length ? `<span class="mwtag">${r.mwc.map(c => CONTESTS[c].abbr).join("+")} MUST WIN</span>`
+        : r.settled || r.swing == null || Math.abs(r.swing) < 0.5 ? `<span class="s2">—</span>`
         : r.swing >= 0 ? `<span class="pos" style="font-weight:600">Win</span>` : `<span class="neg" style="font-weight:600">Loss</span>`}</td>
     </tr>`;
   }).join("");
