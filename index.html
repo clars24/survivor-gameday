@@ -1148,11 +1148,13 @@ async function livePoll(force) {
   } catch (e) { livePollFails++; }
 }
 /** Small score/clock tag for a team row. */
-function liveTag(g) {
+function liveTag(g, t) {
   const lv = live.games[gameKey(g)];
   if (!lv || lv.state === "pre" || isNaN(lv.as) || isNaN(lv.hs)) return "";
   const dot = lv.state === "in" ? `<span class="ldot"></span>` : "";
-  return `<span class="lscore">${dot}${lv.as}–${lv.hs}${lv.detail ? " · " + esc(lv.detail) : ""}</span>`;
+  // score reads row-team first: on TEN's row a 7-0 lead says 7–0, never the raw away–home order
+  const score = t === g.home ? `${lv.hs}–${lv.as}` : `${lv.as}–${lv.hs}`;
+  return `<span class="lscore">${dot}${score}${lv.detail ? " · " + esc(lv.detail) : ""}</span>`;
 }
 function isLiveGame(g) {
   const lv = live.games[gameKey(g)];
@@ -1350,7 +1352,15 @@ async function connectShared() {
   renderLock();
   setChip("conn", "connecting…");
   try {
-    const res = await fetch(SYNC_URL + "/state.json");
+    const [res, mktRes] = await Promise.all([
+      fetch(SYNC_URL + "/state.json"),
+      fetch(SYNC_URL + "/mkt.json").catch(() => null)
+    ]);
+    // shared pregame lines land BEFORE the first paint reads them (restoreMkt), so a fresh
+    // device joining mid-game prices identically to one that watched the lines pregame
+    if (mktRes && mktRes.ok) {
+      try { const mm = await mktRes.json(); if (mm && mm.w && mm.m) localStorage.setItem("gamedayMkt", JSON.stringify(mm)); } catch (e) {}
+    }
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     if (data) applyRemote(data);                    // shared copy wins on join
@@ -1392,7 +1402,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1789924843390";
+const BUILD_ID = "1789925133792";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -1461,7 +1471,13 @@ function saveMkt() {
   try {
     const m = {};
     for (const k in live.games) if (live.games[k].mkt != null) m[k] = live.games[k].mkt;
-    if (Object.keys(m).length) localStorage.setItem("gamedayMkt", JSON.stringify({ w: week, m }));
+    if (!Object.keys(m).length) return;
+    const payload = JSON.stringify({ w: week, m });
+    localStorage.setItem("gamedayMkt", payload);
+    // ESPN drops the line from its feed at kickoff, so a device joining mid-game has no
+    // anchor of its own — the shared copy keeps every viewer priced identically
+    if (typeof SYNC_URL !== "undefined") fetch(SYNC_URL + "/mkt.json", { method: "PUT",
+      headers: { "Content-Type": "application/json" }, body: payload }).catch(() => {});
   } catch (e) {}
 }
 
@@ -1756,7 +1772,7 @@ function renderRooting(R, R0) {
       ? `<span class="s2">${r.res === r.t ? "✓ won" : "✗ lost"}</span>`
       : money(r.swing);
     return `<tr class="${r.res ? (lost ? "lost" : "won") : isLiveGame(r.g) ? "livegame" : ""}">
-      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}</span>${liveTag(r.g)}</td>
+      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}</span>${liveTag(r.g, r.t)}</td>
       <td class="num wp mh">${winCell}</td>
       ${perCells}
       <td class="num">${r.sodTot == null || isNaN(r.sodTot) || Math.abs(r.sodTot) < 0.5 ? `<span class="s2">—</span>`
@@ -1888,7 +1904,7 @@ function renderContestView(c, b) {
     const lost = r.res && r.res !== r.t;
     const status = r.res ? (r.res === r.t ? ` <span class="stW">✓</span>` : ` <span class="stL">✗</span>`) : "";
     return `<tr class="${r.res ? (lost ? "lost" : "won") : isLiveGame(r.g) ? "livegame" : ""}">
-      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${liveTag(r.g)}${status}</td>
+      <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${liveTag(r.g, r.t)}${status}</td>
       <td class="num s mh">${r.res ? (r.res === r.t ? "100%" : "0%") : Math.round(r.wp * 100) + "%"}</td>
       <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : "gold"}">${r.s.mine || ""}</td>
       <td class="num s mh">${r.s.mine ? r.s.minePct.toFixed(1) + "%" : ""}</td>
