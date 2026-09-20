@@ -1073,7 +1073,7 @@ const fmtN = v => v >= 100 ? Math.round(v).toLocaleString("en-US") : (Math.round
  * host blocks external requests (the artifact viewer does; the public site doesn't). */
 const ESPN_TEAM = { WSH: "WAS", LA: "LAR" };
 function espnAbbr(a) { a = String(a || "").toUpperCase(); return NAMES[a] ? a : ESPN_TEAM[a] || null; }
-let livePollFails = 0, livePollLast = 0, livePollWeek = 0;
+let livePollFails = 0, livePollLast = 0, livePollWeek = 0, livePollDoneWeek = 0;
 async function livePoll(force) {
   if (!force && document.hidden) return;
   if (livePollFails >= 3 && Date.now() - livePollLast < 300000) return;   // back off to 5 min after repeated failures
@@ -1127,6 +1127,7 @@ async function livePoll(force) {
       } catch (e) {}
     }
     if (changed) queueSave();
+    livePollDoneWeek = w;        // a full poll for this week has landed — first paint may proceed
     if (w === week) saveMkt();   // never cache one week's lines under another's key
     const el = document.activeElement;
     const holdingFirstPaint = typeof glue !== "undefined" && glue.onFirstData;   // don't paint stale state under a pending live pull
@@ -1437,13 +1438,13 @@ function render() {
   normalizeState();
   week = autoWeek();
   restoreMkt();
-  // A device with no cached lines yet (first visit) would paint one model-priced frame and
-  // then visibly re-price when the poll lands. Hold the very first paint until the lines
-  // arrive — bounded, so a dead feed still paints on the model within 2.5s.
+  // The first paint always waits for a completed poll of the current week: cached pregame
+  // lines are not enough once games are live (in-game probabilities and finals only arrive
+  // with the poll), so painting early would flash stale values. Bounded, so a dead feed
+  // still paints within 2.5s.
   if (paintHold === null) {
-    const haveMkt = SCHEDULE.some(g => g.week === week && live.games[gameKey(g)] && live.games[gameKey(g)].mkt != null);
     const pending = SCHEDULE.some(g => g.week === week && !resultOf(g));
-    if (!haveMkt && pending) {
+    if (pending && livePollDoneWeek !== week) {
       paintHold = true;
       const done = () => { if (paintHold) { paintHold = false; render(); } };
       livePoll(true).then(done, done);
