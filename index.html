@@ -1633,7 +1633,6 @@ function renderRooting(R, R0) {
     <th class="num sortable" data-k="total">${th2("Worth Now", "Now")}${sortArrow(mainSort, "total")}</th>
     <th class="num sortable" data-k="root">${th2("Root for?", "Root")}${sortArrow(mainSort, "root")}</th></tr>`);
   const teamRows = [];
-  let anyData = false;
   for (const { g, k, settled, dTot, per, must } of R.games) {
     const res = resultOf(g);
     for (const t of [g.away, g.home]) {
@@ -1642,7 +1641,7 @@ function renderRooting(R, R0) {
         const s = statTeam(R.base[c], c, g, t);
         if (!s) continue;
         mine += s.mine;
-        if (s.alive > 0) { anyData = true; fCnt += s.fieldCnt; }
+        if (s.alive > 0) fCnt += s.fieldCnt;
       }
       const sign = t === g.home ? 1 : -1;
       const perT = {};
@@ -1652,9 +1651,9 @@ function renderRooting(R, R0) {
         swing: settled ? null : dTot * sign, wp: winP(t, g) });
     }
   }
-  // once picks are in (any imported field or recorded picks), drop teams nobody is on
+  // every team of every game shows — unpicked teams are the ones we root FOR, their win
+  // being what kills the opposing pickers
   const shown = teamRows
-    .filter(r => !anyData || r.mine > 0 || r.fCnt > 0)
     .sort((a, b) => {
       if (mainSort.key === "team") return mainSort.dir * a.t.localeCompare(b.t) || b.wp - a.wp;
       let av, bv;
