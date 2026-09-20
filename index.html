@@ -1390,16 +1390,33 @@ async function connectShared() {
  * deliberately OUTSIDE the 2.5s diff loop so 18k-entry rosters never ride every push. */
 function poolPersist(c) {
   const payload = packPool(c);
+  payload.rev = Date.now();
   try { localStorage.setItem("gamedayPool_" + c, JSON.stringify(payload)); } catch (e) {}
   fetch(SYNC_URL + "/pool/" + c + ".json", { method: "PUT",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
+  fetch(SYNC_URL + "/poolrev/" + c + ".json", { method: "PUT",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload.rev) }).catch(() => {});
 }
 async function poolRestore() {
   let got = false;
+  // rosters only change at weekly imports: one tiny revision fetch decides whether the
+  // megabyte pool blobs need re-downloading, so refreshes cost ~0.2MB instead of ~1.4MB
+  let revs = null;
+  try { const r = await fetch(SYNC_URL + "/poolrev.json"); if (r.ok) revs = await r.json(); } catch (e) {}
   for (const c of CONTEST_KEYS) {
     let payload = null;
-    try { const r = await fetch(SYNC_URL + "/pool/" + c + ".json"); if (r.ok) payload = await r.json(); } catch (e) {}
-    if (!payload) { try { payload = JSON.parse(localStorage.getItem("gamedayPool_" + c)); } catch (e) {} }
+    const rev = revs && revs[c];
+    try {
+      const cached = JSON.parse(localStorage.getItem("gamedayPool_" + c));
+      if (cached && rev != null && cached.rev === rev) payload = cached;
+    } catch (e) {}
+    if (!payload) {
+      try { const r = await fetch(SYNC_URL + "/pool/" + c + ".json"); if (r.ok) payload = await r.json(); } catch (e) {}
+      if (payload) {
+        if (rev != null) payload.rev = rev;
+        try { localStorage.setItem("gamedayPool_" + c, JSON.stringify(payload)); } catch (e) {}
+      } else { try { payload = JSON.parse(localStorage.getItem("gamedayPool_" + c)); } catch (e) {} }
+    }
     if (payload) { unpackPool(c, payload); got = true; }
   }
   if (got && !glue.onFirstData) render();   // during boot the first-data paint covers it
@@ -1408,7 +1425,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1789926754705";
+const BUILD_ID = "1789926945921";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
