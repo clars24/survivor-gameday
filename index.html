@@ -1029,13 +1029,14 @@ const fmtN = v => v >= 100 ? Math.round(v).toLocaleString("en-US") : (Math.round
  * host blocks external requests (the artifact viewer does; the public site doesn't). */
 const ESPN_TEAM = { WSH: "WAS", LA: "LAR" };
 function espnAbbr(a) { a = String(a || "").toUpperCase(); return NAMES[a] ? a : ESPN_TEAM[a] || null; }
-let livePollFails = 0, livePollLast = 0;
+let livePollFails = 0, livePollLast = 0, livePollWeek = 0;
 async function livePoll(force) {
   if (!force && document.hidden) return;
   if (livePollFails >= 3 && Date.now() - livePollLast < 300000) return;   // back off to 5 min after repeated failures
   livePollLast = Date.now();
+  const w = livePollWeek = week;   // the week this poll is for — render re-polls if it moves on
   try {
-    const data = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=2026&seasontype=2&week=" + week)
+    const data = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100&dates=2026&seasontype=2&week=" + w)
       .then(r => r.json());
     livePollFails = 0;
     let changed = false;
@@ -1046,7 +1047,7 @@ async function livePoll(force) {
       const away = (comp.competitors || []).find(x => x.homeAway === "away");
       if (!home || !away) continue;
       const h = espnAbbr(home.team && home.team.abbreviation), a = espnAbbr(away.team && away.team.abbreviation);
-      const g = h && a ? SCHEDULE.find(x => x.week === week && x.home === h && x.away === a) : null;
+      const g = h && a ? SCHEDULE.find(x => x.week === w && x.home === h && x.away === a) : null;
       if (!g) continue;
       const k = gameKey(g);
       const st = (ev.status && ev.status.type) || {};
@@ -1082,6 +1083,7 @@ async function livePoll(force) {
       } catch (e) {}
     }
     if (changed) queueSave();
+    if (w === week) saveMkt();   // never cache one week's lines under another's key
     const el = document.activeElement;
     const holdingFirstPaint = typeof glue !== "undefined" && glue.onFirstData;   // don't paint stale state under a pending live pull
     if (!holdingFirstPaint && !(document.hasFocus() && el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) render();
@@ -1363,9 +1365,36 @@ function weekLabel(w) {
   return "Week " + w + (specials.length ? " · " + specials.join(" + ") : "");
 }
 
+/* Market lines live only in page memory, so a fresh load used to price its first paint off the
+ * ratings model and then visibly re-price a second later when the ESPN poll landed. Cache the
+ * last-seen pregame lines per device and seed them before pricing; a fresh poll still wins. */
+let mktRestoredFor = 0;
+function restoreMkt() {
+  if (mktRestoredFor === week) return;
+  mktRestoredFor = week;
+  try {
+    const c = JSON.parse(localStorage.getItem("gamedayMkt") || "null");
+    if (c && c.w === week && c.m) for (const k in c.m) {
+      const lv = live.games[k] = live.games[k] || {};
+      if (lv.mkt == null && !isNaN(Number(c.m[k]))) lv.mkt = Number(c.m[k]);
+    }
+  } catch (e) {}
+}
+function saveMkt() {
+  try {
+    const m = {};
+    for (const k in live.games) if (live.games[k].mkt != null) m[k] = live.games[k].mkt;
+    if (Object.keys(m).length) localStorage.setItem("gamedayMkt", JSON.stringify({ w: week, m }));
+  } catch (e) {}
+}
+
 function render() {
   normalizeState();
   week = autoWeek();
+  restoreMkt();
+  // the boot poll can fire before the data pull settles the real week — chase it immediately
+  // instead of pricing off the model until the next 60s tick
+  if (livePollWeek !== week) livePoll(true);
   $("wkBadge").textContent = weekLabel(week);
   const R = rootingGuide(week);
   let R0;                       // the week as of Sunday morning: no results, pregame probabilities
