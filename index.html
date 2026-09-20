@@ -285,7 +285,7 @@
       <h2>This week — what each result is worth</h2>
       <div class="sub">Expected $ swing per contest if the team wins vs loses, priced across every scenario of
         the other pending games · results and Win % update automatically from the live feed
-        (in-game probability, else the market line, else the model)</div>
+        (market line moved by the in-game swing, else the model)</div>
       <div style="overflow-x:auto"><table class="games even" id="rootTable"><thead id="rootHead"></thead><tbody id="rootBody"></tbody></table></div>
     </div>
   </div>
@@ -344,13 +344,24 @@ function modelWinP(team, g) {
  * game kicks off) > typed override > pregame market line > ratings model.
  * DAY_MODE recomputes the week "as of Sunday morning": this week's results and in-game probabilities
  * are ignored, so the start-of-day rooting list is reproducible any time. */
-let live = { games: {} };   // live.games[gameKey] = { state, detail, as, hs, id, wp (home, in-game), mkt (home, pregame) }
+let live = { games: {} };   // live.games[gameKey] = { state, detail, as, hs, id, wp (home, in-game), wp0 (home, ESPN's opener), mkt (home, pregame) }
 let DAY_MODE = false;
 function winP(team, g) {
   const k = gameKey(g);
   const lv = live.games[k];
   if (!DAY_MODE && lv && lv.state === "in" && lv.wp != null && !isNaN(lv.wp)) {
-    const p = Math.max(0.01, Math.min(0.99, Number(lv.wp)));
+    const wp = Math.max(0.01, Math.min(0.99, Number(lv.wp)));
+    let p = wp;
+    // Market-anchored live pricing: the betting line is the base and ESPN's model supplies
+    // only the in-game MOVEMENT from its own opener (a log-odds shift). At kickoff this
+    // equals the market line exactly — no source-switch jolt — and a blowout still prices
+    // to ~0/100%. Without a market line (or opener), fall back to ESPN's raw number.
+    if (lv.mkt != null && !isNaN(lv.mkt) && lv.wp0 != null && !isNaN(lv.wp0)) {
+      const lg = x => Math.log(x / (1 - x));
+      const mkt = Math.max(0.01, Math.min(0.99, Number(lv.mkt)));
+      const wp0 = Math.max(0.01, Math.min(0.99, Number(lv.wp0)));
+      p = 1 / (1 + Math.exp(-(lg(mkt) + lg(wp) - lg(wp0))));
+    }
     return team === g.home ? p : 1 - p;
   }
   const t = state.winp && state.winp[k];
@@ -1123,6 +1134,8 @@ async function livePoll(force) {
         if (wpArr && wpArr.length) {
           const p = Number(wpArr[wpArr.length - 1].homeWinPercentage);
           if (!isNaN(p)) live.games[s.k].wp = p;
+          const p0 = Number(wpArr[0].homeWinPercentage);   // ESPN's opener — the anchor for the market blend
+          if (!isNaN(p0)) live.games[s.k].wp0 = p0;
         }
       } catch (e) {}
     }
