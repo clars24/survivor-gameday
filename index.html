@@ -416,12 +416,13 @@ function buildLegs(style, doubles) {
 const CONTESTS = {
   circa:     { name: "Circa Survivor",              short: "Circa",      abbr: "CIR",  fee: 1000,
                defaultN: 18000, potFixed: null,     legs: buildLegs("circa") },
-  grand:     { name: "Grandissimo",                 short: "Grand",      abbr: "GRD",  fee: 100000,
-               defaultN: 60,    potFixed: null,     legs: buildLegs("circa") },
   splash1k:  { name: "Survivor World Championship", short: "Splash 1K",  abbr: "S1K",  fee: 1000,
                defaultN: 22700, potFixed: 21000000, legs: buildLegs("splash", [9,12,13,14,15,16]) },
   splash100: { name: "The Big Splash",              short: "Splash 100", abbr: "S100", fee: 100,
-               defaultN: 33334, potFixed: 3000000,  legs: buildLegs("splash", [3,6,9,12,13,14,15,16]) }
+               defaultN: 33334, potFixed: 3000000,  legs: buildLegs("splash", [3,6,9,12,13,14,15,16]) },
+  /* Grandissimo last: we are out of it, so it sits at the end of the tab bar and the columns. */
+  grand:     { name: "Grandissimo",                 short: "Grand",      abbr: "GRD",  fee: 100000,
+               defaultN: 60,    potFixed: null,     legs: buildLegs("circa") }
 };
 const CONTEST_KEYS = Object.keys(CONTESTS);
 function legById(c, legId) { return CONTESTS[c].legs.find(l => l.id === legId) || null; }
@@ -1425,7 +1426,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1789926945921";
+const BUILD_ID = "1790015000993";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
