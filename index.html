@@ -700,6 +700,58 @@ function myEntryAliveUpTo(c, name, uptoIdx, hyp) {
   }
   return true;
 }
+/** Can this import anchor the field count? Entry lists and team counts are real head counts; a percent
+ *  paste only carries shares (its alive is borrowed from the running count), so it never anchors. */
+function isHeadCount(fd) { return !!(fd && fd.alive > 0 && fd.src !== "percent"); }
+
+/* ---- double-pick legs: which picks went together ----
+ * An import only gives each team's share of ENTRIES (a 2-pick week totals ~200%), never the pairs.
+ * Every entry holds exactly two teams, so the dead share for a set L of losers is exact inclusion-
+ * exclusion that stops at pairs:  D = Σ s_i − Σ_{i<j in L} P(i,j).  We estimate the pairs as
+ * P(i,j) = a_i·a_j (0 for two sides of the same game), with a fitted so each team's pairs sum back to
+ * its share. That factorisation makes losses cheap to chain: when t loses, the part of its holders
+ * already dead is a_t × A, where A = Σ a over the teams that have lost so far — so a leg's state is
+ * just {D, A}. It replaces multiplying survivals, which treated the two picks as independent and
+ * roughly doubled the overlap (GB 17% dead, then DET 15% loses: ~9% of DET's holders were already
+ * out, not 17%). Single-pick legs get a = 0, which is plain additive loss. */
+const _pairCache = new WeakMap();
+function legPairs(fd, leg) {
+  if (!fd || !(fd.alive > 0)) return { s: {}, a: {} };
+  const hit = _pairCache.get(fd);
+  if (hit && hit.leg === leg) return hit.P;
+  const s = {}, a = {};
+  for (const t in fd.own) s[t] = (fd.own[t] || 0) / fd.alive;
+  if (leg.picks > 1) {
+    const opp = {};
+    for (const g of leg.games) { opp[g.home] = g.away; opp[g.away] = g.home; }
+    const ts = Object.keys(s).filter(t => s[t] > 0);
+    const tot = ts.reduce((x, t) => x + s[t], 0);
+    for (const t of ts) a[t] = s[t] / Math.sqrt(Math.max(tot, 1e-9));
+    for (let it = 0; it < 300; it++) {           // fixed point a_i = s_i / (A − a_i − a_opp(i)), damped
+      let A = 0, delta = 0;
+      for (const t of ts) A += a[t];
+      for (const t of ts) {
+        const rest = A - a[t] - (a[opp[t]] || 0);
+        const nx = rest > 1e-12 ? Math.sqrt(a[t] * s[t] / rest) : a[t];
+        delta = Math.max(delta, Math.abs(nx - a[t])); a[t] = nx;
+      }
+      if (delta < 1e-10) break;
+    }
+  }
+  const P = { s, a };
+  _pairCache.set(fd, { leg, P });
+  return P;
+}
+/** Kill the holders of `losers` (one team, or both on a TIE) in a leg state {D, A}; weight w in [0,1]
+ *  applies an EXPECTED loss (w = chance that side loses) for games folded rather than enumerated. */
+function legKill(st, P, losers, w) {
+  const k = w == null ? 1 : w;
+  let dD = 0, dA = 0;
+  for (const t of losers) { dD += (P.s[t] || 0) - (P.a[t] || 0) * st.A; dA += P.a[t] || 0; }
+  st.D += k * dD; st.A += k * dA;
+}
+function legLosers(g, w) { return w === "TIE" ? [g.away, g.home] : [w === g.home ? g.away : g.home]; }
+function legSurv(st) { return Math.max(0, 1 - st.D); }
 function fieldAliveEntering(c, i) {
   const legs = CONTESTS[c].legs;
   const manual = Number(state.sizes[c]);
@@ -709,7 +761,7 @@ function fieldAliveEntering(c, i) {
   // fractions drifted off the real count (Circa W3: 25,017 typed -> 8,139 vs Circa's own 8,110).
   for (let k = i; k >= 0; k--) {
     const fd = state.field[c][legs[k].id];
-    if (fd && fd.alive > 0) { j = k; break; }
+    if (isHeadCount(fd)) { j = k; break; }
   }
   if (j >= 0) {
     n = Number(state.field[c][legs[j].id].alive); exact = true;
@@ -723,16 +775,15 @@ function fieldAliveEntering(c, i) {
   for (; j < i; j++) {
     const leg = legs[j], fd = state.field[c][leg.id];
     if (!fd || !(fd.alive > 0)) { exact = false; continue; }
-    let surv = 1, lost = 0, anyPending = false;
+    const P = legPairs(fd, leg), st = { D: 0, A: 0 };
+    let anyPending = false;
     for (const g of leg.games) {
       const w = winnerOf(g, null);
       if (!w) { anyPending = true; continue; }
-      const sA = (fd.own[g.away] || 0) / fd.alive, sH = (fd.own[g.home] || 0) / fd.alive;
-      const share = w === "TIE" ? sA + sH : w === g.home ? sA : sH;
-      if (leg.picks > 1) surv *= Math.max(0, 1 - share); else lost += share;
+      legKill(st, P, legLosers(g, w));
     }
     if (anyPending) exact = false;
-    n *= leg.picks > 1 ? surv : Math.max(0, 1 - lost);
+    n *= legSurv(st);
   }
   return { n, exact, src };
 }
@@ -745,7 +796,7 @@ function fieldPrevEntering(c, i) {
   let j = -1, n;
   for (let k = i - 1; k >= 0; k--) {
     const fd = state.field[c][legs[k].id];
-    if (fd && fd.alive > 0) { j = k; break; }
+    if (isHeadCount(fd)) { j = k; break; }
   }
   if (j >= 0) n = Number(state.field[c][legs[j].id].alive);
   else if (manual > 0) { n = manual; j = 0; }
@@ -753,15 +804,12 @@ function fieldPrevEntering(c, i) {
   for (; j < i; j++) {
     const leg = legs[j], fd = state.field[c][leg.id];
     if (!fd || !(fd.alive > 0)) continue;
-    let surv = 1, lost = 0;
+    const P = legPairs(fd, leg), st = { D: 0, A: 0 };
     for (const g of leg.games) {
       const w = winnerOf(g, null);
-      if (!w) continue;
-      const sA = (fd.own[g.away] || 0) / fd.alive, sH = (fd.own[g.home] || 0) / fd.alive;
-      const share = w === "TIE" ? sA + sH : w === g.home ? sA : sH;
-      if (leg.picks > 1) surv *= Math.max(0, 1 - share); else lost += share;
+      if (w) legKill(st, P, legLosers(g, w));
     }
-    n *= leg.picks > 1 ? surv : Math.max(0, 1 - lost);
+    n *= legSurv(st);
   }
   return { n };
 }
@@ -796,8 +844,8 @@ function noPickInfo(c, b) {
  * denominator at those share sizes. */
 function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   const nL = legs.length;
-  const baseDead = new Array(nL).fill(0);   // single-pick legs: additive lost share
-  const baseSurv = new Array(nL).fill(1);   // multi-pick legs: multiplicative survival
+  const base = legs.map(() => ({ D: 0, A: 0 }));   // per-leg dead share + lost-team pair weight (legKill)
+  const pairs = legs.map(leg => legPairs(state.field[c][leg.id], leg));
   const pend = new Map();                   // gameKey -> pending game info
   const hidden = [];                        // games whose field ownership is not visible yet
   const gameStarted = g => { const l = live.games[gameKey(g)]; return !!(l && l.state && l.state !== "pre"); };
@@ -813,14 +861,13 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
       const sH = revealed ? (fd.own[g.home] || 0) / fd.alive : 0;
       const wnr = winnerOf(g, hyp);
       if (wnr) {
-        const dead = wnr === "TIE" ? sA + sH : wnr === g.home ? sA : sH;
-        if (multi) baseSurv[li] *= Math.max(0, 1 - dead); else baseDead[li] += dead;
+        if (revealed) legKill(base[li], pairs[li], legLosers(g, wnr));
         continue;
       }
       const k = gameKey(g);
       let e = pend.get(k);
       if (!e) { e = { g, k, p: winP(g.home, g), at: [], ours: false }; pend.set(k, e); }
-      e.at.push({ li, sA, sH, multi });
+      e.at.push({ li, sA, sH, multi, revealed });
     }
   });
 
@@ -860,7 +907,13 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
           }
         }
         const d = Math.min(0.999999, lost / entries.length);
-        if (d > 0) { if (h.multi) baseSurv[h.li] *= 1 - d; else baseDead[h.li] += d; }
+        if (d > 0) {
+          // no team identity for a prior: a pseudo-team of share d, pair weight at the leg's average rate
+          const P = pairs[h.li]; let S = 0, Aw = 0;
+          for (const t in P.a) { S += P.s[t] || 0; Aw += P.a[t]; }
+          const pa = h.multi && S > 0 ? d * Aw / S : 0;
+          legKill(base[h.li], { s: { _h: d }, a: { _h: pa } }, ["_h"]);
+        }
       }
     } finally { DAY_MODE = dm; }
   }
@@ -871,8 +924,9 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   const en = games.slice(0, 12);
   for (const e of games.slice(12)) {
     for (const a of e.at) {
-      const eDead = a.sA * e.p + a.sH * (1 - e.p);   // away pickers die when home wins
-      if (a.multi) baseSurv[a.li] *= Math.max(0, 1 - eDead); else baseDead[a.li] += eDead;
+      if (!a.revealed) continue;
+      legKill(base[a.li], pairs[a.li], [e.g.away], e.p);       // away pickers die when home wins
+      legKill(base[a.li], pairs[a.li], [e.g.home], 1 - e.p);
     }
   }
   const bit = new Map(en.map((e, i) => [e.k, i]));
@@ -892,12 +946,12 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   }
 
   let ev = 0;
-  const dead = baseDead.slice(), surv = baseSurv.slice();
+  const cur = base.map(b => ({ D: b.D, A: b.A }));
   const walk = (i, pr, winMask) => {
     if (pr < 1e-12) return;
     if (i === en.length) {
       let F = Fin0;
-      for (let li = 0; li < nL; li++) F *= legs[li].picks > 1 ? surv[li] : Math.max(0, 1 - dead[li]);
+      for (let li = 0; li < nL; li++) F *= legSurv(cur[li]);
       let M = 0;
       for (const s of sigList) if ((winMask & s.mask) === s.want) M += s.val;
       if (M > 1e-9) ev += pr * pot * M / Math.max(F, M);
@@ -911,12 +965,12 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
       if (p2 <= 0) continue;
       const undo = [];
       for (const a of e.at) {
-        const d = side ? a.sA : a.sH;
-        if (a.multi) { undo.push([a.li, surv[a.li], 1]); surv[a.li] *= Math.max(0, 1 - d); }
-        else { undo.push([a.li, dead[a.li], 0]); dead[a.li] += d; }
+        if (!a.revealed) continue;
+        undo.push([a.li, cur[a.li].D, cur[a.li].A]);
+        legKill(cur[a.li], pairs[a.li], [side ? e.g.away : e.g.home]);
       }
       walk(i + 1, pr * p2, side ? (winMask | (1 << i)) : winMask);
-      for (const [li, v, m] of undo) { if (m) surv[li] = v; else dead[li] = v; }
+      for (let u = undo.length - 1; u >= 0; u--) { const [li, D, A] = undo[u]; cur[li].D = D; cur[li].A = A; }
     }
   };
   walk(0, 1, 0);
@@ -958,20 +1012,20 @@ function contestWeekEV(c, w, hyp) {
     const haveOwn = !!(fd && fd.alive > 0);
     if (!haveOwn) missingField.push(leg.id);
 
-    let surv = 1, lost = 0, esurv = 1, elost = 0;
+    const st = { D: 0, A: 0 }, est = { D: 0, A: 0 };   // settled / expected (see legKill)
     if (haveOwn) {
+      const P = legPairs(fd, leg);
       for (const g of leg.games) {
         const wnr = winnerOf(g, hyp);
-        const shareA = (fd.own[g.away] || 0) / fd.alive, shareH = (fd.own[g.home] || 0) / fd.alive;
-        let dead, edead;
-        if (wnr) { dead = wnr === "TIE" ? shareA + shareH : wnr === g.home ? shareA : shareH; edead = dead; }
-        else { dead = 0; edead = shareA * (1 - winP(g.away, g)) + shareH * (1 - winP(g.home, g)); }
-        if (leg.picks > 1) { surv *= 1 - dead; esurv *= 1 - edead; }
-        else { lost += dead; elost += edead; }
+        if (wnr) { legKill(st, P, legLosers(g, wnr)); legKill(est, P, legLosers(g, wnr)); }
+        else {
+          legKill(est, P, [g.away], 1 - winP(g.away, g));
+          legKill(est, P, [g.home], 1 - winP(g.home, g));
+        }
       }
     }
-    F  = leg.picks > 1 ? Fin * surv : Fin * Math.max(0, 1 - lost);
-    eF = leg.picks > 1 ? eF * esurv : eF * Math.max(0, 1 - elost);
+    F  = Fin * legSurv(st);
+    eF = eF * legSurv(est);
 
     aliveNames = aliveNames.filter(n => {
       for (const t of pickTeams((state.mine[c][n] || {})[leg.id])) if (teamLostIn(leg, t, hyp)) return false;
@@ -1423,7 +1477,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1790472861520";
+const BUILD_ID = "1790474494636";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -1821,13 +1875,16 @@ function weekTally(c, b) {
   for (const leg of b.legs) {
     const fd = state.field[c][leg.id];
     if (!fd || !(fd.alive > 0)) { haveAll = false; break; }
-    let w = 0;
+    // share of entries whose EVERY pick has already won: single leg = Σ winners' shares; double leg =
+    // pairs inside the winner set, Σ_{i<j} a_i·a_j = ((Σa)² − Σa²)/2 (winners never share a game)
+    const P = legPairs(fd, leg);
+    let w = 0, Aw = 0, A2 = 0;
     for (const g of leg.games) {
       const res = winnerOf(g, null);
       if (!res || res === "TIE") continue;
-      w += (fd.own[res] || 0) / fd.alive;
+      w += P.s[res] || 0; const x = P.a[res] || 0; Aw += x; A2 += x * x;
     }
-    frac *= leg.picks > 1 ? w / leg.picks : w;
+    frac *= leg.picks > 1 ? Math.max(0, (Aw * Aw - A2) / 2) : w;
   }
   const fieldElim = Math.max(0, Math.round(b.Fin0 - b.F));
   const fieldSurv = haveAll ? Math.round(b.Fin0 * frac) : null;
@@ -2328,7 +2385,9 @@ async function runImport(c, textOpt) {
     if (agg) {
       let own = agg.own, alive;
       if (agg.mode === "percent") {
-        alive = (state.field[c][legId] && state.field[c][legId].alive) || state.sizes[c] || CONTESTS[c].defaultN;
+        // percentages are of ENTRIES (a double week totals ~200%), so size them to the field entering
+        // this leg — the typed contest size is the week-1 field and would inflate every later week
+        alive = fieldAliveEntering(c, legIndex(c, legId)).n;
         const counts = {};
         for (const t in own) counts[t] = own[t] / 100 * alive;
         own = counts;
