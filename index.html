@@ -1477,7 +1477,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1790474494636";
+const BUILD_ID = "1790474637668";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -1795,12 +1795,12 @@ function renderRooting(R, R0) {
   if (R0) for (const { g, dTot } of R0.games) { sodT[g.home] = dTot; sodT[g.away] = -dTot; }
   const headChanged = setHtml($("rootHead"), `<tr>
     <th class="bnr"></th><th class="bnr mh"></th>
-    <th class="grp mh" colspan="${CONTEST_KEYS.length + 2}">If Wins</th><th class="grp mo" colspan="2">If Wins</th><th class="bnr"></th></tr>
+    <th class="grp mh" colspan="${CONTEST_KEYS.length + 2}">If Wins Worth</th><th class="grp mo" colspan="2">If Wins Worth</th><th class="bnr"></th></tr>
     <tr><th class="sortable" data-k="team">Team${sortArrow(mainSort, "team")}</th>
     <th class="num sortable mh" data-k="wp">${th2("Win %", "Win")}${sortArrow(mainSort, "wp")}</th>
     ${CONTEST_KEYS.map(c => `<th class="num sortable mh" data-k="${c}">${th2(esc(CONTESTS[c].short), CONTESTS[c].abbr)}${sortArrow(mainSort, c)}</th>`).join("")}
-    <th class="num sortable" data-k="sodt">${th2("Start of week", "Start")}${sortArrow(mainSort, "sodt")}</th>
-    <th class="num sortable" data-k="total">${th2("Worth Now", "Now")}${sortArrow(mainSort, "total")}</th>
+    <th class="num sortable" data-k="sodt">${th2("Start", "Start")}${sortArrow(mainSort, "sodt")}</th>
+    <th class="num sortable" data-k="total">${th2("Now", "Now")}${sortArrow(mainSort, "total")}</th>
     <th class="num sortable" data-k="root">${th2("Root for?", "Root")}${sortArrow(mainSort, "root")}</th></tr>`);
   const teamRows = [];
   for (const { g, k, settled, dTot, per, must } of R.games) {
@@ -2072,7 +2072,7 @@ function renderContestView(c, b) {
       <div style="overflow-x:auto"><table class="games even"><thead id="cHead">
         <tr><th class="bnr"></th><th class="bnr mh"></th><th class="bnr"></th><th class="bnr mh"></th>
           <th class="bnr"></th><th class="bnr mh"></th><th class="bnr"></th>
-          <th class="grp mh" colspan="2">If Wins</th><th class="grp mo" colspan="1">If Wins</th><th class="bnr"></th></tr>
+          <th class="grp mh" colspan="2">If Wins Worth</th><th class="grp mo" colspan="1">If Wins Worth</th><th class="bnr"></th></tr>
         <tr><th class="sortable" data-k="team">Team${sortArrow(boardSort, "team")}</th>
         <th class="num sortable mh" data-k="wp"><span class="th-full">Win %</span><span class="th-sm">Win</span>${sortArrow(boardSort, "wp")}</th>
         <th class="num sortable" data-k="ours">Ours${sortArrow(boardSort, "ours")}</th>
@@ -2080,8 +2080,8 @@ function renderContestView(c, b) {
         <th class="num sortable" data-k="field">Field${sortArrow(boardSort, "field")}</th>
         <th class="num sortable mh" data-k="fieldpct"><span class="th-full">Field %</span><span class="th-sm">F%</span>${sortArrow(boardSort, "fieldpct")}</th>
         <th class="num sortable" data-k="lev">Lev${sortArrow(boardSort, "lev")}</th>
-        <th class="num sortable mh" data-k="sod"><span class="th-full">Start of week</span><span class="th-sm">Start</span>${sortArrow(boardSort, "sod")}</th>
-        <th class="num sortable" data-k="cur"><span class="th-full">Worth Now</span><span class="th-sm">Now</span>${sortArrow(boardSort, "cur")}</th>
+        <th class="num sortable mh" data-k="sod"><span class="th-full">Start</span><span class="th-sm">Start</span>${sortArrow(boardSort, "sod")}</th>
+        <th class="num sortable" data-k="cur"><span class="th-full">Now</span><span class="th-sm">Now</span>${sortArrow(boardSort, "cur")}</th>
         <th class="num sortable" data-k="root"><span class="th-full">Root for?</span><span class="th-sm">Root</span>${sortArrow(boardSort, "root")}</th></tr>
       </thead><tbody id="cGames">${gameRows}${(() => {
         const np = noPickInfo(c, b);
