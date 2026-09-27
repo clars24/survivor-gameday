@@ -829,7 +829,10 @@ function noPickInfo(c, b) {
     for (const leg of b.legs) {
       const lfd = state.field[c][leg.id];
       if (!lfd || !(lfd.alive > 0)) continue;
-      if (pickTeams((state.mine[c][n] || {})[leg.id]).length < leg.picks) { ours++; break; }
+      const ps = pickTeams((state.mine[c][n] || {})[leg.id]);
+      // a double-week entry recorded with just its losing pick is dead on that pick, not a no-pick
+      if (ps.some(t => teamLostIn(leg, t, null))) continue;
+      if (ps.length < leg.picks) { ours++; break; }
     }
   }
   return { ours, field, prevN: prev ? prev.n : null, oursPct: b.Min0 ? 100 * ours / b.Min0 : 0 };
@@ -1477,7 +1480,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1790474637668";
+const BUILD_ID = "1790530934926";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
