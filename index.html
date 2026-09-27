@@ -704,22 +704,21 @@ function fieldAliveEntering(c, i) {
   const legs = CONTESTS[c].legs;
   const manual = Number(state.sizes[c]);
   let j = -1, n, exact, src;
-  if (manual > 0) {
-    // typed size is authoritative: anchor the season start on it and step forward with the
-    // imports' loss FRACTIONS (shares survive a different absolute size)
+  // the newest import is an exact head count and always wins; the typed size only anchors the season
+  // start when nothing has been imported yet. Anchoring on the typed size and scaling by import loss
+  // fractions drifted off the real count (Circa W3: 25,017 typed -> 8,139 vs Circa's own 8,110).
+  for (let k = i; k >= 0; k--) {
+    const fd = state.field[c][legs[k].id];
+    if (fd && fd.alive > 0) { j = k; break; }
+  }
+  if (j >= 0) {
+    n = Number(state.field[c][legs[j].id].alive); exact = true;
+    src = legs[j].id + " import";
+  } else if (manual > 0) {
     n = manual; exact = true; j = 0; src = "manual size";
   } else {
-    for (let k = i; k >= 0; k--) {
-      const fd = state.field[c][legs[k].id];
-      if (fd && fd.alive > 0) { j = k; break; }
-    }
-    if (j < 0) {
-      n = startN(c); exact = false; j = 0;
-      src = "default size";
-    } else {
-      n = state.field[c][legs[j].id].alive; exact = true;
-      src = legs[j].id + " import";
-    }
+    n = startN(c); exact = false; j = 0;
+    src = "default size";
   }
   for (; j < i; j++) {
     const leg = legs[j], fd = state.field[c][leg.id];
@@ -744,15 +743,13 @@ function fieldPrevEntering(c, i) {
   const legs = CONTESTS[c].legs;
   const manual = Number(state.sizes[c]);
   let j = -1, n;
-  if (manual > 0) { n = manual; j = 0; }
-  else {
-    for (let k = i - 1; k >= 0; k--) {
-      const fd = state.field[c][legs[k].id];
-      if (fd && fd.alive > 0) { j = k; break; }
-    }
-    if (j < 0) return null;
-    n = Number(state.field[c][legs[j].id].alive);
+  for (let k = i - 1; k >= 0; k--) {
+    const fd = state.field[c][legs[k].id];
+    if (fd && fd.alive > 0) { j = k; break; }
   }
+  if (j >= 0) n = Number(state.field[c][legs[j].id].alive);
+  else if (manual > 0) { n = manual; j = 0; }
+  else return null;
   for (; j < i; j++) {
     const leg = legs[j], fd = state.field[c][leg.id];
     if (!fd || !(fd.alive > 0)) continue;
@@ -1426,7 +1423,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1790015000993";
+const BUILD_ID = "1790472861520";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
