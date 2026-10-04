@@ -1225,9 +1225,7 @@ function isLiveGame(g) {
 /* ============================== SHARED-STATE GLUE (public site: Firebase RTDB) ==============================
  * The shared copy lives in the group's Firebase Realtime Database. Everyone who opens the site sees it
  * live (pull + EventSource stream); edits push as multi-path PATCH diffs every 2.5s with per-key merge.
- * Reads are public. Writes need a Google sign-in on the editor allowlist: the page sends the user's
- * Firebase ID token with every write and database.rules.json rejects anyone else, so the database
- * itself is locked, not just the page. Everyone else gets the read-only board.
+ * New visitors land in spectator mode — a click enables editing (accident prevention, not security).
  * If the database is unreachable the page still works read-your-own-copy off localStorage. */
 /* Path bumped to /gameday2026b when the flash-loop fix shipped: tabs still running the pre-fix build
  * fight over the OLD path and can never clobber this one. */
@@ -1235,17 +1233,7 @@ const SYNC_URL = "https://survivor-gameday-default-rtdb.firebaseio.com/gameday20
 const SYNC_KEYS = ["names", "mine", "field", "sizes", "results", "winp", "money", "_sync"];
 const SYNC_DEPTH = { names: 2, mine: 3, field: 3, sizes: 1, results: 1, winp: 1, money: 2, _sync: 1 };
 const glue = { last: "", es: null, timer: null, pushing: false, pendingRemote: null, on: false,
-               editor: false, user: null };
-/* Firebase web config for the survivor-gameday project. None of this is secret — the security is the
- * database rules. EDITORS here only decides which controls the page shows; the rules hold the real list. */
-const FB_CONFIG = {
-  apiKey: "AIzaSyCzyJBtansCspnEIhscDNBYzeYXPE_RyQk",
-  authDomain: "survivor-gameday.firebaseapp.com",
-  projectId: "survivor-gameday",
-  databaseURL: "https://survivor-gameday-default-rtdb.firebaseio.com"
-};
-const EDITORS = ["larsocor@gmail.com"];
-try { localStorage.removeItem("gamedayEditor"); } catch (e) {}   // the old key-link grant means nothing now
+               editor: (function () { try { return localStorage.getItem("gamedayEditor") === "1"; } catch (e) { return false; } })() };
 function loadEmbedded() { return false; }
 function lsSave() { try { localStorage.setItem("gameday2026", JSON.stringify(state)); } catch (e) {} }
 function lsLoad() {
@@ -1342,9 +1330,8 @@ async function syncPush() {
     let lastObj = null; try { lastObj = glue.last ? JSON.parse(glue.last) : null; } catch (e) {}
     const patch = syncDiff(snap, lastObj);
     if (Object.keys(patch).length) {
-      const res = await fetch(SYNC_URL + "/state.json" + await authQ(), {
+      const res = await fetch(SYNC_URL + "/state.json", {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
-      if (res.status === 401 || res.status === 403) { glue.pushing = false; setChip("off", "no edit permission"); return; }
       if (!res.ok) throw new Error("HTTP " + res.status);
       const merged = lastObj || {};
       for (const p in patch) {
@@ -1383,71 +1370,29 @@ function openStream() {
   glue.es.onerror = () => setChip("off", "reconnecting…");
   glue.es.onopen = () => { if (glue.on) setChip("live", "live · shared"); };
 }
-/* ---- editor sign-in (Google, via Firebase Auth) ----
- * The SDK loads lazily from gstatic; viewers who never touch the button still load it (to restore a
- * signed-in editor's session on their device), but the board never waits on it. */
-function loadScript(src) {
-  return new Promise((ok, bad) => { const el = document.createElement("script"); el.src = src; el.onload = ok; el.onerror = bad; document.head.appendChild(el); });
-}
-let authReady = null;
-function initAuth() {
-  if (authReady) return authReady;
-  authReady = (async () => {
-    const v = "https://www.gstatic.com/firebasejs/10.12.2/";
-    await loadScript(v + "firebase-app-compat.js");
-    await loadScript(v + "firebase-auth-compat.js");
-    firebase.initializeApp(FB_CONFIG);
-    const auth = firebase.auth();
-    auth.onAuthStateChanged(u => {
-      glue.user = u || null;
-      const em = u && u.email ? u.email.toLowerCase() : "";
-      glue.editor = !!(u && u.emailVerified && EDITORS.includes(em));
-      renderLock();
-      if (glue.on) render();
-    });
-    return auth;
-  })().catch(e => { authReady = null; throw e; });
-  return authReady;
-}
-async function authQ() {
-  if (!glue.user) return "";
-  try { return "?auth=" + encodeURIComponent(await glue.user.getIdToken()); } catch (e) { return ""; }
-}
-/** Editor-only PUT to a shared path (pool imports, shared market lines). Viewers never write. */
-async function sharedWrite(path, body) {
-  if (!glue.editor) return false;
-  try {
-    const r = await fetch(SYNC_URL + path + await authQ(), { method: "PUT",
-      headers: { "Content-Type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
-    return r.ok;
-  } catch (e) { return false; }
-}
-function authButton() {
-  let b = document.getElementById("btnAuth");
-  if (!b) {
-    b = document.createElement("button");
-    b.id = "btnAuth"; b.className = "btn";
-    const chip = document.getElementById("shareChip");
-    chip.parentNode.insertBefore(b, chip.nextSibling);
-    b.onclick = async () => {
-      try {
-        const auth = await initAuth();
-        if (glue.user) { await auth.signOut(); return; }
-        const prov = new firebase.auth.GoogleAuthProvider();
-        prov.setCustomParameters({ prompt: "select_account" });
-        try { await auth.signInWithPopup(prov); }
-        catch (e) { if (e && /popup/.test(e.code || "")) await auth.signInWithRedirect(prov); else throw e; }
-      } catch (e) { setChip("off", "sign-in failed — " + ((e && e.code) || "try again")); }
-    };
-  }
-  const em = glue.user && glue.user.email ? glue.user.email : "";
-  b.textContent = !glue.user ? "Editor sign-in" : glue.editor ? em + " · sign out" : "not an editor · sign out";
-  b.title = glue.editor ? "Signed in — your edits save to the shared board" : "";
-}
+/* Editing is unlocked ONLY by opening the site once with the secret key link
+ * (…/#key=<passphrase>); the page stores the grant per device and strips the key from the
+ * address bar. Viewers of the plain link get a clean read-only board with no way in. The page
+ * carries only the SHA-256 of the passphrase, and this is accident-prevention for a
+ * world-writable store, not cryptographic security. */
+const EDIT_KEY_HASH = "4611ffe06fb751f2bdbba17d378b7fa4b63ce49ead1c633c15dd30e4c535d4c5";
 function renderLock() {
   document.body.classList.toggle("locked", !glue.editor);
   document.getElementById("roBanner").style.display = "none";
-  authButton();
+}
+async function checkEditKey() {
+  const m = location.hash.match(/^#key=(.+)$/) || location.search.match(/[?&]key=([^&]+)/);
+  if (!m) return;
+  try {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(decodeURIComponent(m[1])));
+    const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+    if (hex === EDIT_KEY_HASH) {
+      glue.editor = true;
+      try { localStorage.setItem("gamedayEditor", "1"); } catch (e) {}
+    }
+  } catch (e) {}
+  history.replaceState(null, "", location.pathname);
+  renderLock();
 }
 (function lockCss() {
   const st = document.createElement("style");
@@ -1455,6 +1400,7 @@ function renderLock() {
     "body.locked .setwrap, body.locked .ourpicks, body.locked #btnImport { display: none !important; }";
   document.head.appendChild(st);
 })();
+window.addEventListener("hashchange", checkEditKey);
 /* Refresh flash fix: hold the first paint for the LIVE copy (applyRemote paints it); only if the
  * network doesn't answer within ~1.4s does the localStorage fallback get drawn. */
 function firstPaint() {
@@ -1463,8 +1409,8 @@ function firstPaint() {
   connectShared();
 }
 async function connectShared() {
+  await checkEditKey();
   renderLock();
-  initAuth().catch(() => {});                       // restores a signed-in editor; never blocks the board
   setChip("conn", "connecting…");
   try {
     const [res, mktRes] = await Promise.all([
@@ -1501,7 +1447,10 @@ function poolPersist(c) {
   const payload = packPool(c);
   payload.rev = Date.now();
   try { localStorage.setItem("gamedayPool_" + c, JSON.stringify(payload)); } catch (e) {}
-  sharedWrite("/pool/" + c + ".json", payload).then(ok => { if (ok) sharedWrite("/poolrev/" + c + ".json", payload.rev); });
+  fetch(SYNC_URL + "/pool/" + c + ".json", { method: "PUT",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
+  fetch(SYNC_URL + "/poolrev/" + c + ".json", { method: "PUT",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload.rev) }).catch(() => {});
 }
 async function poolRestore() {
   let got = false;
@@ -1531,7 +1480,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1791077211409";
+const BUILD_ID = "1791077280220";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -1607,8 +1556,8 @@ function saveMkt() {
     localStorage.setItem("gamedayMkt", payload);
     // ESPN drops the line from its feed at kickoff, so a device joining mid-game has no
     // anchor of its own — the shared copy keeps every viewer priced identically
-    // (public site only, and only signed-in editors may write the shared DB)
-    if (typeof sharedWrite === "function") sharedWrite("/mkt.json", payload);
+    if (typeof SYNC_URL !== "undefined") fetch(SYNC_URL + "/mkt.json", { method: "PUT",
+      headers: { "Content-Type": "application/json" }, body: payload }).catch(() => {});
   } catch (e) {}
 }
 
