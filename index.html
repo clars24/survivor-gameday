@@ -1428,6 +1428,18 @@ async function sharedWrite(path, body) {
 function renderLock() {
   document.body.classList.toggle("locked", !glue.editor);
   document.getElementById("roBanner").style.display = "none";
+  // a visible "you are the editor" badge: the controls alone don't make the state obvious
+  let bd = document.getElementById("edBadge");
+  if (!bd) {
+    bd = document.createElement("span");
+    bd.id = "edBadge";
+    bd.style.cssText = "font-size:11px;color:var(--money);border:1px solid #35c77c55;border-radius:999px;padding:2px 8px;margin-left:6px;white-space:nowrap";
+    bd.textContent = "✎ editing";
+    bd.title = "Signed in as the editor on this device — your changes save to the shared board";
+    const chip = document.getElementById("shareChip");
+    chip.parentNode.insertBefore(bd, chip.nextSibling);
+  }
+  bd.style.display = glue.editor ? "" : "none";
 }
 async function checkEditKey() {
   const m = location.hash.match(/^#key=(.+)$/) || location.search.match(/[?&]key=([^&]+)/);
@@ -1524,7 +1536,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1791209642640";
+const BUILD_ID = "1791211269768";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
