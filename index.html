@@ -900,16 +900,26 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   // live probabilities, so conditional moves flow through our side only and the baseline
   // share stays sensible.
   if (entries.length && hidden.length) {
+    /* The prior is "the field loses the same share of its LIVE entries in this game as our live book
+     * does" — measured on both sides against who is still alive after the settled results. Measuring ours
+     * against everyone entering (incl. entries already dead on a settled pick) and applying it to the
+     * field's entering count over-killed the field whenever it had lost more than us on the settled
+     * games (Splash 1K W5: field 38% on DAL vs ours 14% inflated the card ~27%). Settled results only —
+     * still blind to hypotheticals and live odds, so the baseline stays a fixed prior. */
+    const settledDead = n => legs.some(leg => pickTeams((state.mine[c][n] || {})[leg.id]).some(t => teamLostIn(leg, t, null)));
+    const liveOurs = entries.filter(n => !settledDead(n));
+    const fieldLive = base.map(b => legSurv(b));          // field share still alive per leg after settled games
     const dm = DAY_MODE; DAY_MODE = true;
     try {
       for (const h of hidden) {
+        if (!liveOurs.length) break;
         let lost = 0;
-        for (const n of entries) {
+        for (const n of liveOurs) {
           for (const t of pickTeams((state.mine[c][n] || {})[h.legId])) {
             if (gameOfTeam(legs[h.li], t) === h.g) lost += 1 - winP(t, h.g);
           }
         }
-        const d = Math.min(0.999999, lost / entries.length);
+        const d = Math.min(0.999999, lost / liveOurs.length * fieldLive[h.li]);
         if (d > 0) {
           // no team identity for a prior: a pseudo-team of share d, pair weight at the leg's average rate
           const P = pairs[h.li]; let S = 0, Aw = 0;
@@ -1536,7 +1546,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1791211269768";
+const BUILD_ID = "1791693903454";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
