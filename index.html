@@ -1005,7 +1005,9 @@ function contestWeekEV(c, w, hyp) {
    * every pending loss scales with it. Fin0 itself stays the true entering count (start-of-week basis). */
   let FinX = Fin0;
   const ovr = state.field[c][legs[0].id] && state.field[c][legs[0].id].liveN;
-  if (ovr && Number(ovr.n) > 0) {
+  // not in DAY_MODE: the start-of-week replay has no results yet, so a mid-slate count would be read
+  // as the kickoff field (Splash 100 W6: 216 instead of 1,634) and wreck the frozen start-of-week list
+  if (ovr && Number(ovr.n) > 0 && !DAY_MODE) {
     let fs = 1;
     for (const leg of legs) {
       const fd = state.field[c][leg.id];
@@ -1562,7 +1564,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1792364907876";
+const BUILD_ID = "1792365747530";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
