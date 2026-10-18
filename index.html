@@ -1000,9 +1000,25 @@ function contestWeekEV(c, w, hyp) {
   let aliveNames = names.filter(n => myEntryAliveUpTo(c, n, i0, hyp));
   const entering = aliveNames;   // snapshot for the scenario pricer — the leg loop reassigns
   const Min0 = aliveNames.length, Fin0 = Math.max(fld.n, Min0);
+  /* Live field override: field[c][leg].liveN = { n } is the contest's own "entries remaining" count,
+   * typed mid-slate. The model's settled field (Fin0 x settled survival) is scaled to hit it exactly and
+   * every pending loss scales with it. Fin0 itself stays the true entering count (start-of-week basis). */
+  let FinX = Fin0;
+  const ovr = state.field[c][legs[0].id] && state.field[c][legs[0].id].liveN;
+  if (ovr && Number(ovr.n) > 0) {
+    let fs = 1;
+    for (const leg of legs) {
+      const fd = state.field[c][leg.id];
+      if (!fd || !(fd.alive > 0)) continue;
+      const P = legPairs(fd, leg), st = { D: 0, A: 0 };
+      for (const g of leg.games) { const w = winnerOf(g, null); if (w) legKill(st, P, legLosers(g, w)); }
+      fs *= legSurv(st);
+    }
+    if (fs > 0) FinX = Math.max(Min0, Number(ovr.n) / fs);
+  }
 
-  let F = Fin0, M = Min0, cohortEV = null, cohortLeg = null;
-  let eF = Fin0, eM = 0;
+  let F = FinX, M = Min0, cohortEV = null, cohortLeg = null;
+  let eF = FinX, eM = 0;
   const rows = [];
   const missingField = [];
 
@@ -1076,10 +1092,10 @@ function contestWeekEV(c, w, hyp) {
   const byTeam = {};
   for (const r of rows) byTeam[r.team] = r;
   const evNow = cohortEV != null ? cohortEV : (M > 0 ? pot * M / Math.max(F, M) : 0);
-  const evExp = cohortEV != null ? cohortEV : scenarioEV(c, legs, hyp, entering, Fin0, Min0, pot);
+  const evExp = cohortEV != null ? cohortEV : scenarioEV(c, legs, hyp, entering, FinX, Min0, pot);
   return {
     contest: c, legs, pot, src: fld.src, exact: fld.exact && !missingField.length,
-    Fin0, Min0, F, M, eF, eM, evNow, evExp, cohortLeg, rows, byTeam, missingField,
+    Fin0, FinX, Min0, F, M, eF, eM, evNow, evExp, cohortLeg, rows, byTeam, missingField,
     noNames: !names.length
   };
 }
@@ -1546,7 +1562,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1791693903454";
+const BUILD_ID = "1792364907876";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -1956,8 +1972,8 @@ function weekTally(c, b) {
     frac *= leg.picks > 1 ? Math.max(0, (Aw * Aw - A2) / 2) : w;
   }
   const fieldElim = Math.max(0, Math.round(b.Fin0 - b.F));
-  const fieldSurv = haveAll ? Math.round(b.Fin0 * frac) : null;
-  const fieldPend = fieldSurv == null ? null : Math.max(0, Math.round(b.Fin0) - fieldElim - fieldSurv);
+  const fieldSurv = haveAll ? Math.round((b.FinX || b.Fin0) * frac) : null;   // FinX: live-count scaled
+  const fieldPend = fieldSurv == null ? null : Math.max(0, Math.round(b.F) - fieldSurv);
   return { oursSurv, oursElim, oursPend, fieldSurv, fieldElim, fieldPend };
 }
 
