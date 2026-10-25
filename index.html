@@ -1191,15 +1191,19 @@ async function livePoll(force) {
       const away = (comp.competitors || []).find(x => x.homeAway === "away");
       if (!home || !away) continue;
       const h = espnAbbr(home.team && home.team.abbreviation), a = espnAbbr(away.team && away.team.abbreviation);
-      const g = h && a ? SCHEDULE.find(x => x.week === w && x.home === h && x.away === a) : null;
+      // neutral-site games (London, Germany...) can be listed with home/away the other way round from
+      // our schedule (W7 2026: ESPN "PIT VS NO" has NO home, we have NO@PIT) — match either way and
+      // translate scores and win probabilities into OUR orientation
+      let g = h && a ? SCHEDULE.find(x => x.week === w && x.home === h && x.away === a) : null, flip = false;
+      if (!g && h && a) { g = SCHEDULE.find(x => x.week === w && x.home === a && x.away === h) || null; flip = !!g; }
       if (!g) continue;
       const k = gameKey(g);
       const st = (ev.status && ev.status.type) || {};
       const prev = live.games[k] || {};
       const lv = live.games[k] = {
         state: st.state, detail: st.shortDetail || "",
-        as: Number(away.score), hs: Number(home.score), id: ev.id,
-        wp: prev.wp, mkt: prev.mkt
+        as: Number((flip ? home : away).score), hs: Number((flip ? away : home).score), id: ev.id,
+        wp: prev.wp, mkt: prev.mkt, flip
       };
       const odds = comp.odds && comp.odds[0];   // ESPN keeps the pregame line on the feed all day
       if (odds && odds.details) {
@@ -1210,7 +1214,7 @@ async function livePoll(force) {
             lv.mkt = normCdf((fav === g.home ? line : -line) / MARGIN_SD);
         }
       }
-      if (lv.state === "in") inGame.push({ k, id: ev.id });
+      if (lv.state === "in") inGame.push({ k, id: ev.id, flip });
       if (lv.state === "post" && !isNaN(lv.as) && !isNaN(lv.hs)) {
         const winner = lv.as === lv.hs ? "TIE" : lv.hs > lv.as ? g.home : g.away;
         if (state.results[k] !== winner) { state.results[k] = winner; changed = true; }
@@ -1221,10 +1225,11 @@ async function livePoll(force) {
         const sm = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=" + s.id).then(r => r.json());
         const wpArr = sm && sm.winprobability;
         if (wpArr && wpArr.length) {
+          const fl = p => s.flip ? 1 - p : p;   // ESPN's "home" is our away on a flipped neutral-site game
           const p = Number(wpArr[wpArr.length - 1].homeWinPercentage);
-          if (!isNaN(p)) live.games[s.k].wp = p;
+          if (!isNaN(p)) live.games[s.k].wp = fl(p);
           const p0 = Number(wpArr[0].homeWinPercentage);   // ESPN's opener — the anchor for the market blend
-          if (!isNaN(p0)) live.games[s.k].wp0 = p0;
+          if (!isNaN(p0)) live.games[s.k].wp0 = fl(p0);
         }
       } catch (e) {}
     }
@@ -1564,7 +1569,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1792365747530";
+const BUILD_ID = "1792943818457";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
