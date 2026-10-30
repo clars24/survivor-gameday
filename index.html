@@ -752,6 +752,27 @@ function legKill(st, P, losers, w) {
 }
 function legLosers(g, w) { return w === "TIE" ? [g.away, g.home] : [w === g.home ? g.away : g.home]; }
 function legSurv(st) { return Math.max(0, 1 - st.D); }
+/* Placeholder until a week's picks are loaded (user, Oct 29 2026): any entry whose pick for the leg isn't
+ * known — ours or the field's — is assumed to be on a team that wins 70% of the time. */
+const PLACEHOLDER_WIN = 0.70;
+/** Field share (of entering) that dies to the placeholder: the entries the import doesn't assign. */
+function placeholderDead(fd, leg) {
+  const k = leg.picks || 1;
+  let u;                                        // unassigned picks per entry, on average
+  if (!fd || !(fd.alive > 0)) u = k;
+  else {
+    let assigned = 0;
+    for (const t in fd.own) assigned += Number(fd.own[t]) || 0;
+    u = Math.max(0, (Number(fd.alive) * k - assigned) / Number(fd.alive));
+  }
+  return k > 1 ? 1 - Math.pow(PLACEHOLDER_WIN, u) : Math.min(1, u) * (1 - PLACEHOLDER_WIN);
+}
+/** How many of our entry's picks for these legs are still unknown. */
+function missingPicks(c, n, legs) {
+  let m = 0;
+  for (const leg of legs) m += Math.max(0, (leg.picks || 1) - pickTeams((state.mine[c][n] || {})[leg.id]).length);
+  return m;
+}
 function fieldAliveEntering(c, i) {
   const legs = CONTESTS[c].legs;
   const manual = Number(state.sizes[c]);
@@ -850,7 +871,6 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   const base = legs.map(() => ({ D: 0, A: 0 }));   // per-leg dead share + lost-team pair weight (legKill)
   const pairs = legs.map(leg => legPairs(state.field[c][leg.id], leg));
   const pend = new Map();                   // gameKey -> pending game info
-  const hidden = [];                        // games whose field ownership is not visible yet
   legs.forEach((leg, li) => {
     const fd = state.field[c][leg.id], haveOwn = !!(fd && fd.alive > 0), multi = leg.picks > 1;
     for (const g of leg.games) {
@@ -861,7 +881,6 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
       // NOT reveal anything: Splash publishes at the pick deadline, so a partial import (TNF/London only)
       // used to read every started 1pm game as "field has 0 there" and crash EV mid-slate (W7: $690K vs $951K).
       const revealed = haveOwn && (fd.own[g.away] != null || fd.own[g.home] != null);
-      if (!revealed) hidden.push({ g, li, multi, legId: leg.id });
       const sA = revealed ? (fd.own[g.away] || 0) / fd.alive : 0;
       const sH = revealed ? (fd.own[g.home] || 0) / fd.alive : 0;
       const wnr = winnerOf(g, hyp);
@@ -892,46 +911,17 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
     }
     if (dead) continue;
     for (const r of req) pend.get(r.k).ours = true;
-    const key = req.map(r => r.k + (r.home ? "H" : "A")).sort().join("|");
+    const miss = missingPicks(c, n, legs);
+    const key = req.map(r => r.k + (r.home ? "H" : "A")).sort().join("|") + "#" + miss;
     const s = sigs.get(key);
-    if (s) s.cnt++; else sigs.set(key, { cnt: 1, req });
+    if (s) s.cnt++; else sigs.set(key, { cnt: 1, req, ph: Math.pow(PLACEHOLDER_WIN, miss) });
   }
-  // Hidden games: the field can't stay immortal there while our picks sweat. Until that
-  // game's ownership wave lands, thin the field by our own book's PREGAME expected dead
-  // share for the game — a fixed prior, deliberately blind to results, hypotheticals and
-  // live probabilities, so conditional moves flow through our side only and the baseline
-  // share stays sensible.
-  if (entries.length && hidden.length) {
-    /* The prior is "the field loses the same share of its LIVE entries in this game as our live book
-     * does" — measured on both sides against who is still alive after the settled results. Measuring ours
-     * against everyone entering (incl. entries already dead on a settled pick) and applying it to the
-     * field's entering count over-killed the field whenever it had lost more than us on the settled
-     * games (Splash 1K W5: field 38% on DAL vs ours 14% inflated the card ~27%). Settled results only —
-     * still blind to hypotheticals and live odds, so the baseline stays a fixed prior. */
-    const settledDead = n => legs.some(leg => pickTeams((state.mine[c][n] || {})[leg.id]).some(t => teamLostIn(leg, t, null)));
-    const liveOurs = entries.filter(n => !settledDead(n));
-    const fieldLive = base.map(b => legSurv(b));          // field share still alive per leg after settled games
-    const dm = DAY_MODE; DAY_MODE = true;
-    try {
-      for (const h of hidden) {
-        if (!liveOurs.length) break;
-        let lost = 0;
-        for (const n of liveOurs) {
-          for (const t of pickTeams((state.mine[c][n] || {})[h.legId])) {
-            if (gameOfTeam(legs[h.li], t) === h.g) lost += 1 - winP(t, h.g);
-          }
-        }
-        const d = Math.min(0.999999, lost / liveOurs.length * fieldLive[h.li]);
-        if (d > 0) {
-          // no team identity for a prior: a pseudo-team of share d, pair weight at the leg's average rate
-          const P = pairs[h.li]; let S = 0, Aw = 0;
-          for (const t in P.a) { S += P.s[t] || 0; Aw += P.a[t]; }
-          const pa = h.multi && S > 0 ? d * Aw / S : 0;
-          legKill(base[h.li], { s: { _h: d }, a: { _h: pa } }, ["_h"]);
-        }
-      }
-    } finally { DAY_MODE = dm; }
-  }
+  // Field entries the import doesn't assign (picks not revealed yet, or no import at all) die at the
+  // placeholder rate — a fixed amount, blind to results, hypotheticals and live odds.
+  legs.forEach((leg, li) => {
+    const d = placeholderDead(state.field[c][leg.id], leg);
+    if (d > 0) legKill(base[li], { s: { _ph: d }, a: { _ph: 0 } }, ["_ph"]);
+  });
 
   const games = [...pend.values()];
   const wt = e => Math.max(...e.at.map(a => Math.max(a.sA, a.sH)));
@@ -946,8 +936,8 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   }
   const bit = new Map(en.map((e, i) => [e.k, i]));
   const sigList = [];
-  for (const { cnt, req } of sigs.values()) {
-    let mask = 0, want = 0, fold = 1, ok = true;
+  for (const { cnt, req, ph } of sigs.values()) {
+    let mask = 0, want = 0, fold = ph, ok = true;
     for (const r of req) {
       const b = bit.get(r.k);
       if (b == null) { const e = pend.get(r.k); fold *= r.home ? e.p : 1 - e.p; }
@@ -1036,7 +1026,7 @@ function contestWeekEV(c, w, hyp) {
         p *= wnr ? (wnr === t ? 1 : 0) : winP(t, g);
       }
     }
-    eM += p;
+    eM += p * Math.pow(PLACEHOLDER_WIN, missingPicks(c, n, legs));
   }
 
   for (const leg of legs) {
@@ -1057,6 +1047,8 @@ function contestWeekEV(c, w, hyp) {
         }
       }
     }
+    const dph = placeholderDead(fd, leg);
+    if (dph > 0) legKill(est, { s: { _ph: dph }, a: { _ph: 0 } }, ["_ph"]);
     F  = Fin * legSurv(st);
     eF = eF * legSurv(est);
 
@@ -1571,7 +1563,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1792948299429";
+const BUILD_ID = "1793324275075";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
