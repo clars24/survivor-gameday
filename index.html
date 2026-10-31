@@ -1579,7 +1579,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1793468249534";
+const BUILD_ID = "1793468859459";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -1754,6 +1754,8 @@ function renderTiles(R) {
   }
   const col = d => d >= 0.5 ? "var(--money)" : d <= -0.5 ? "var(--bad)" : "var(--ink-3)";
   const buyin = Number(state.money.buyin) || 0;
+  const inbuys = Number(state.money.inbuys) || 0;          // bought DURING the season (e.g. half an entry); already inside buyin
+  const inbuysNote = state.money.inbuysNote ? ` (${esc(String(state.money.inbuysNote))})` : "";
   const dW = evExp - weekTot, dC = evExp - startTot, dB = evExp - buyin;
   setHtml($("tiles"), `
     <div class="tile"><div class="k">Live EV</div>
@@ -1761,7 +1763,8 @@ function renderTiles(R) {
         <span style="font-size:17px;font-weight:700">
           <span style="white-space:nowrap"><span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2" style="font-size:11px">vs Start of Week</span></span>
           ${buyin > 0 ? `<span style="white-space:nowrap"><span style="color:${col(dB)}">${sw2(dB)}</span> <span class="s2" style="font-size:11px">vs Total Buy In</span></span>` : ""}</span></div>
-      <div class="s">started week ${fmtMoney(weekTot)} · started contest ${fmtMoney(startTot)}${buyin > 0 ? ` · total buy-in ${fmtMoney(buyin)}` : ""}</div></div>
+      <div class="s">started week ${fmtMoney(weekTot)} · started contest ${fmtMoney(startTot)}${buyin > 0 ? ` · total buy-in ${fmtMoney(buyin)}` : ""}</div>
+      ${inbuys > 0 ? `<div class="s">in-contest buys ${fmtMoney(inbuys)}${inbuysNote}</div>` : ""}</div>
     <div class="tile"><div class="k">Pots</div>
       <div class="potgrid">
         <span class="ph"></span><span class="ph">pot</span><span class="ph">per entry</span>
