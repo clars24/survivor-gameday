@@ -437,7 +437,8 @@ let state = {
   sizes:  {},
   results: {},
   winp:   {},
-  money:  { pots: {}, fees: {} }
+  money:  { pots: {}, fees: {} },
+  share:  {}                       // share[c][entryName] = fraction of the entry we own (absent = 1)
 };
 let week = 1;                      // always the current week (first with an unresolved game)
 function normalizeState() {
@@ -445,7 +446,7 @@ function normalizeState() {
     if (!state[k]) state[k] = {};
     for (const c of CONTEST_KEYS) if (!state[k][c]) state[k][c] = k === "names" ? [] : {};
   }
-  for (const k of ["sizes", "results", "winp"]) if (!state[k]) state[k] = {};
+  for (const k of ["sizes", "results", "winp", "share"]) if (!state[k]) state[k] = {};
   if (!state.pool) state.pool = {};        // packed entry-level pool (see packPool)
   if (!state.money) state.money = { pots: {}, fees: {} };
   if (!state.money.pots) state.money.pots = {};
@@ -453,6 +454,18 @@ function normalizeState() {
   if (!state.money.starts) state.money.starts = {};   // starting-EV overrides (cost basis)
 }
 function feeOf(c)  { const o = Number(state.money.fees[c]); return o > 0 ? o : CONTESTS[c].fee; }
+/* Partial ownership (Oct 31 2026): an entry we own a piece of (e.g. half a Splash 1K entry) counts as ONE
+ * entry in the field — it is one of the field's alive heads — but only its owned fraction of the pot
+ * share is ours. Everywhere "our entries" feed the numerator (M, Min0, eM, scenario masses, cohort splits,
+ * started counts) they are weighted by shareOf; the field lower bound F >= our alive heads still uses
+ * whole heads. Set in Setup by writing "NAME @50%" on the entry's line. */
+function shareOf(c, n) {
+  const v = Number(state.share && state.share[c] && state.share[c][n]);
+  return v > 0 && v < 1 ? v : 1;
+}
+function namesWeight(c, names) { return (names || state.names[c] || []).reduce((s, n) => s + shareOf(c, n), 0); }
+/** Format an entry count that may be fractional: 16, 16.5, 0.5. */
+const fmtEnt = v => Number.isInteger(v) ? String(v) : (Math.round(v * 100) / 100).toString();
 /* Everything read back from the shared store is validated before use: team tokens against NAMES,
  * numbers through Number(). The store is world-writable by design, so the page must stay safe even
  * against hand-crafted junk written directly into it. */
@@ -680,12 +693,12 @@ function startN(c) {
 function contestStartEV(c) {
   const o = Number(state.money.starts && state.money.starts[c]);
   if (o > 0) return o;
-  return startN(c) > 0 ? potOf(c) * (state.names[c] || []).length / startN(c) : 0;
+  return startN(c) > 0 ? potOf(c) * namesWeight(c) / startN(c) : 0;
 }
 /** Start-of-week EV: in the contest's first week it IS the contest start; afterwards pro-rata entering. */
 function weekStartEV(c, b) {
   if (legIndex(c, b.legs[0].id) === 0) return contestStartEV(c);
-  return b.Fin0 > 0 ? b.pot * b.Min0 / Math.max(b.Fin0, b.Min0) : 0;
+  return b.Fin0 > 0 ? b.pot * b.Min0 / Math.max(b.Fin0, b.Min0N) : 0;
 }
 function potOf(c) {
   const o = Number(state.money.pots[c]);
@@ -853,7 +866,7 @@ function noPickInfo(c, b) {
       const ps = pickTeams((state.mine[c][n] || {})[leg.id]);
       // a double-week entry recorded with just its losing pick is dead on that pick, not a no-pick
       if (ps.some(t => teamLostIn(leg, t, null))) continue;
-      if (ps.length < leg.picks) { ours++; break; }
+      if (ps.length < leg.picks) { ours += shareOf(c, n); break; }
     }
   }
   return { ours, field, prevN: prev ? prev.n : null, oursPct: b.Min0 ? 100 * ours / b.Min0 : 0 };
@@ -914,7 +927,8 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
     const miss = missingPicks(c, n, legs);
     const key = req.map(r => r.k + (r.home ? "H" : "A")).sort().join("|") + "#" + miss;
     const s = sigs.get(key);
-    if (s) s.cnt++; else sigs.set(key, { cnt: 1, req, ph: Math.pow(PLACEHOLDER_WIN, miss) });
+    const w = shareOf(c, n);
+    if (s) { s.cnt += w; s.heads++; } else sigs.set(key, { cnt: w, heads: 1, req, ph: Math.pow(PLACEHOLDER_WIN, miss) });
   }
   // Field entries the import doesn't assign (picks not revealed yet, or no import at all) die at the
   // placeholder rate — a fixed amount, blind to results, hypotheticals and live odds.
@@ -936,7 +950,7 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   }
   const bit = new Map(en.map((e, i) => [e.k, i]));
   const sigList = [];
-  for (const { cnt, req, ph } of sigs.values()) {
+  for (const { cnt, heads, req, ph } of sigs.values()) {
     let mask = 0, want = 0, fold = ph, ok = true;
     for (const r of req) {
       const b = bit.get(r.k);
@@ -947,7 +961,7 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
         mask |= m; if (r.home) want |= m;
       }
     }
-    if (ok && fold > 0) sigList.push({ mask, want, val: cnt * fold });
+    if (ok && fold > 0) sigList.push({ mask, want, val: cnt * fold, heads: heads * fold });
   }
 
   let ev = 0;
@@ -957,9 +971,9 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
     if (i === en.length) {
       let F = Fin0;
       for (let li = 0; li < nL; li++) F *= legSurv(cur[li]);
-      let M = 0;
-      for (const s of sigList) if ((winMask & s.mask) === s.want) M += s.val;
-      if (M > 1e-9) ev += pr * pot * M / Math.max(F, M);
+      let M = 0, Mh = 0;          // M = our owned share of the alive entries; Mh = alive heads we hold
+      for (const s of sigList) if ((winMask & s.mask) === s.want) { M += s.val; Mh += s.heads; }
+      if (M > 1e-9) ev += pr * pot * M / Math.max(F, Mh);
       // whole field dies with us on the same slate: cohort split among everyone entering
       else if (F < 0.5 && Min0 > 0) ev += pr * pot * Min0 / Math.max(Fin0, 1);
       return;
@@ -991,7 +1005,9 @@ function contestWeekEV(c, w, hyp) {
   const names = state.names[c] || [];
   let aliveNames = names.filter(n => myEntryAliveUpTo(c, n, i0, hyp));
   const entering = aliveNames;   // snapshot for the scenario pricer — the leg loop reassigns
-  const Min0 = aliveNames.length, Fin0 = Math.max(fld.n, Min0);
+  const Min0N = aliveNames.length;                       // alive heads we hold (whole entries)
+  const Min0 = namesWeight(c, aliveNames);               // owned share of those heads
+  const Fin0 = Math.max(fld.n, Min0N);
   /* Live field override: field[c][leg].liveN = { n } is the contest's own "entries remaining" count,
    * typed mid-slate. The model's settled field (Fin0 x settled survival) is scaled to hit it exactly and
    * every pending loss scales with it. Fin0 itself stays the true entering count (start-of-week basis). */
@@ -1008,10 +1024,10 @@ function contestWeekEV(c, w, hyp) {
       for (const g of leg.games) { const w = winnerOf(g, null); if (w) legKill(st, P, legLosers(g, w)); }
       fs *= legSurv(st);
     }
-    if (fs > 0) FinX = Math.max(Min0, Number(ovr.n) / fs);
+    if (fs > 0) FinX = Math.max(Min0N, Number(ovr.n) / fs);
   }
 
-  let F = FinX, M = Min0, cohortEV = null, cohortLeg = null;
+  let F = FinX, M = Min0, Mn = Min0N, cohortEV = null, cohortLeg = null;
   let eF = FinX, eM = 0;
   const rows = [];
   const missingField = [];
@@ -1026,7 +1042,7 @@ function contestWeekEV(c, w, hyp) {
         p *= wnr ? (wnr === t ? 1 : 0) : winP(t, g);
       }
     }
-    eM += p * Math.pow(PLACEHOLDER_WIN, missingPicks(c, n, legs));
+    eM += shareOf(c, n) * p * Math.pow(PLACEHOLDER_WIN, missingPicks(c, n, legs));
   }
 
   for (const leg of legs) {
@@ -1056,11 +1072,11 @@ function contestWeekEV(c, w, hyp) {
       for (const t of pickTeams((state.mine[c][n] || {})[leg.id])) if (teamLostIn(leg, t, hyp)) return false;
       return true;
     });
-    M = aliveNames.length;
-    F = Math.max(F, M);
+    M = namesWeight(c, aliveNames); Mn = aliveNames.length;
+    F = Math.max(F, Mn);
 
     if (F < 0.5 && Fin >= 0.5) {
-      cohortEV = pot * (MinNames.length / Math.max(Fin, 1));
+      cohortEV = pot * (namesWeight(c, MinNames) / Math.max(Fin, 1));
       cohortLeg = leg.id;
       break;
     }
@@ -1068,7 +1084,7 @@ function contestWeekEV(c, w, hyp) {
     const teams = new Set(Object.keys((fd && fd.own) || {}));
     const mineCnt = {};
     for (const n of MinNames) for (const t of pickTeams((state.mine[c][n] || {})[leg.id])) {
-      mineCnt[t] = (mineCnt[t] || 0) + 1; teams.add(t);
+      mineCnt[t] = (mineCnt[t] || 0) + shareOf(c, n); teams.add(t);
     }
     for (const t of teams) {
       if (!NAMES[t]) continue;                 // never render a team token that isn't a real team
@@ -1087,11 +1103,11 @@ function contestWeekEV(c, w, hyp) {
 
   const byTeam = {};
   for (const r of rows) byTeam[r.team] = r;
-  const evNow = cohortEV != null ? cohortEV : (M > 0 ? pot * M / Math.max(F, M) : 0);
+  const evNow = cohortEV != null ? cohortEV : (M > 0 ? pot * M / Math.max(F, Mn) : 0);
   const evExp = cohortEV != null ? cohortEV : scenarioEV(c, legs, hyp, entering, FinX, Min0, pot);
   return {
     contest: c, legs, pot, src: fld.src, exact: fld.exact && !missingField.length,
-    Fin0, FinX, Min0, F, M, eF, eM, evNow, evExp, cohortLeg, rows, byTeam, missingField,
+    Fin0, FinX, Min0, Min0N, F, M, Mn, eF, eM, evNow, evExp, cohortLeg, rows, byTeam, missingField,
     noNames: !names.length
   };
 }
@@ -1260,8 +1276,8 @@ function isLiveGame(g) {
 /* Path bumped to /gameday2026b when the flash-loop fix shipped: tabs still running the pre-fix build
  * fight over the OLD path and can never clobber this one. */
 const SYNC_URL = "https://survivor-gameday-default-rtdb.firebaseio.com/gameday2026b";
-const SYNC_KEYS = ["names", "mine", "field", "sizes", "results", "winp", "money", "_sync"];
-const SYNC_DEPTH = { names: 2, mine: 3, field: 3, sizes: 1, results: 1, winp: 1, money: 2, _sync: 1 };
+const SYNC_KEYS = ["names", "mine", "field", "sizes", "results", "winp", "money", "share", "_sync"];
+const SYNC_DEPTH = { names: 2, mine: 3, field: 3, sizes: 1, results: 1, winp: 1, money: 2, share: 2, _sync: 1 };
 const glue = { last: "", es: null, timer: null, pushing: false, pendingRemote: null, on: false,
                editor: false, user: null };
 /* Firebase web config — not secret; the database rules are the lock. */
@@ -1563,7 +1579,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1793324275075";
+const BUILD_ID = "1793468249534";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -1722,7 +1738,7 @@ function survivedWeek(c, b) {
       }
       if (!ok) break;
     }
-    if (ok) s++;
+    if (ok) s += shareOf(c, n);
   }
   return s;
 }
@@ -1771,7 +1787,7 @@ function renderStrip(R) {
       <div style="font-size:12px;font-weight:700">
         <span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2">vs week</span>
         · <span style="color:${col(dC)}">${sw2(dC)}</span> <span class="s2">vs start</span></div>
-      <span class="al"><span class="gold">${b.M}</span>/${b.Min0} alive · field ${fmtN(b.F)}</span>
+      <span class="al"><span class="gold">${fmtEnt(b.M)}</span>/${fmtEnt(b.Min0)} alive · field ${fmtN(b.F)}</span>
     </button>`;
   }).join("");
   if (setHtml($("conStrip"), html)) $("conStrip").querySelectorAll(".scard").forEach(el => el.onclick = () => {
@@ -2119,11 +2135,11 @@ function renderContestView(c, b) {
         const fPct = v => fTot > 0 ? (100 * v / fTot).toFixed(1) + "%" : "—";
         const line = (color, txt) => `<span class="s2" style="font-weight:600;color:${color}">${txt}</span>`;
         return `<div class="stat"><span class="k">Ours alive</span>
-          <span class="v gold">${b.M}<span class="of">/${(state.names[c] || []).length} started</span></span>
-          <span class="s2">${b.Min0} entered the week</span>
-          ${line("var(--money)", `${wt.oursSurv} survived · ${oPct(wt.oursSurv)}`)}
-          ${line("var(--gold)", `${wt.oursPend} pending · ${oPct(wt.oursPend)}`)}
-          ${line("var(--bad)", `${wt.oursElim} eliminated · ${oPct(wt.oursElim)}`)}</div>
+          <span class="v gold">${fmtEnt(b.M)}<span class="of">/${fmtEnt(namesWeight(c))} started</span></span>
+          <span class="s2">${fmtEnt(b.Min0)} entered the week${b.Min0 !== b.Min0N ? ` (${b.Min0N} heads, part-owned)` : ""}</span>
+          ${line("var(--money)", `${fmtEnt(wt.oursSurv)} survived · ${oPct(wt.oursSurv)}`)}
+          ${line("var(--gold)", `${fmtEnt(wt.oursPend)} pending · ${oPct(wt.oursPend)}`)}
+          ${line("var(--bad)", `${fmtEnt(wt.oursElim)} eliminated · ${oPct(wt.oursElim)}`)}</div>
         <div class="stat"><span class="k">Field alive</span>
           <span class="v">${fmtN(b.F)}<span class="of">/${fmtN(startN(c))} started</span>${est}</span>
           <span class="s2">${fmtN(b.Fin0)} entered the week</span>
@@ -2133,8 +2149,8 @@ function renderContestView(c, b) {
           ${line("var(--bad)", `${fmtN(wt.fieldElim)} eliminated · ${fPct(wt.fieldElim)}`)}`}</div>`;
       })()}
       ${(() => {
-        const shareNow = b.F > 0 ? 100 * b.M / Math.max(b.F, b.M) : 0;
-        const shareIn = b.Fin0 > 0 ? 100 * b.Min0 / Math.max(b.Fin0, b.Min0) : 0;
+        const shareNow = b.F > 0 ? 100 * b.M / Math.max(b.F, b.Mn) : 0;
+        const shareIn = b.Fin0 > 0 ? 100 * b.Min0 / Math.max(b.Fin0, b.Min0N) : 0;
         const d = shareNow - shareIn;
         const dCol = d >= 0.005 ? "var(--money)" : d <= -0.005 ? "var(--bad)" : "var(--ink-3)";
         return `<div class="stat"><span class="k">Our share</span>
@@ -2185,7 +2201,7 @@ function renderContestView(c, b) {
           <td class="num s2">—</td>
         </tr>`;
       })()}</tbody></table></div>
-      <details data-id="picks-${c}" class="ourpicks"><summary>Our picks — ${b.Min0} entries</summary>${pickEditorHtml(c, b)}</details>
+      <details data-id="picks-${c}" class="ourpicks"><summary>Our picks — ${fmtEnt(b.Min0)} entries</summary>${pickEditorHtml(c, b)}</details>
       <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>`}
   </div>`;
   renderContestView._b = b;
@@ -2296,19 +2312,39 @@ function pickEditorHtml(c, b) {
       }
       return sels.join(" ");
     }).join(" · ");
-    return `<tr class="${alive ? "" : "dead"}"><td>${esc(n)}${alive ? "" : " <span class='stL'>eliminated</span>"}</td><td>${cells}</td></tr>`;
+    const sh = shareOf(c, n);
+    const badge = sh < 1 ? ` <span class="s2" title="we own ${Math.round(sh * 100)}% of this entry">(${Math.round(sh * 100)}% owned)</span>` : "";
+    return `<tr class="${alive ? "" : "dead"}"><td>${esc(n)}${badge}${alive ? "" : " <span class='stL'>eliminated</span>"}</td><td>${cells}</td></tr>`;
   }).join("");
   return `<table class="edit"><tbody>${rows}</tbody></table>
     <div class="hint">Used teams are hidden from each entry's dropdown. Imports fill these automatically when an entry name matches.</div>`;
 }
 
+/** Setup textarea <-> names + share map. A line "NAME @50%" (or "@0.5") marks a part-owned entry. */
+function namesText(c) {
+  return (state.names[c] || []).map(n => shareOf(c, n) < 1 ? `${n} @${Math.round(shareOf(c, n) * 100)}%` : n).join("\n");
+}
+function parseNamesText(c, text) {
+  const names = [], share = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const m = raw.trim().match(/^(.*?)\s*@\s*(\d+(?:\.\d+)?)\s*(%?)\s*$/);
+    let n = raw.trim(), v = 1;
+    if (m && m[1]) { n = m[1].trim(); v = Number(m[2]); if (m[3] || v > 1) v /= 100; }
+    if (!n) continue;
+    names.push(n);
+    if (v > 0 && v < 1) share[n] = v;
+  }
+  state.names[c] = names;
+  if (!state.share) state.share = {};
+  state.share[c] = share;
+}
 function setupHtml(c) {
   const C = CONTESTS[c];
   const curLeg = legsForWeek(c, week)[0];
   const legOpts = C.legs.map(l => `<option value="${l.id}" ${curLeg && curLeg.id === l.id ? "selected" : ""}>${l.label}</option>`).join("");
   return `<div class="setgrid">
-    <label>Our entry names <span class="s2">(one per line, exactly as they appear in the contest)</span>
-      <textarea class="nms" data-c="${c}" rows="4">${esc((state.names[c] || []).join("\n"))}</textarea></label>
+    <label>Our entry names <span class="s2">(one per line, exactly as they appear in the contest; add "@50%" after a name for a part-owned entry)</span>
+      <textarea class="nms" data-c="${c}" rows="4">${esc(namesText(c))}</textarea></label>
     <div>
       <label>Field size <span class="s2">(manual override — wins over imports; blank = use the import)</span>
         <input class="cell szin" data-c="${c}" value="${Number(state.sizes[c]) || ""}" placeholder="${C.defaultN}"></label>
@@ -2345,7 +2381,7 @@ function wireContestView(c) {
   });
   // every keystroke commits to state immediately (and localStorage), so a re-render, a sync pull, or a
   // closed tab can never lose typed setup again; blur additionally queues the shared save
-  const commitNms = t => { state.names[t.dataset.c] = t.value.split(/\r?\n/).map(x => x.trim()).filter(Boolean); lsSave(); };
+  const commitNms = t => { parseNamesText(t.dataset.c, t.value); lsSave(); };
   cv.querySelectorAll("textarea.nms").forEach(t => {
     t.oninput = () => commitNms(t);
     t.onchange = () => { commitNms(t); rematchFromPool(t.dataset.c); touch(); };
