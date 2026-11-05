@@ -759,16 +759,18 @@ function legPairs(fd, leg) {
  *  applies an EXPECTED loss (w = chance that side loses) for games folded rather than enumerated. */
 function legKill(st, P, losers, w, pool) {
   const k = w == null ? 1 : w;
-  let dD = 0, dA = 0, dL = 0, dpD = 0;
-  const pA = st.pA || 0;
+  let dD = 0, dA = 0, dL = 0, dX = 0;
+  const X = pool === false ? (st.oA || 0) : (st.pA || 0);
   for (const t of losers) {
     dD += (P.s[t] || 0) - (P.a[t] || 0) * st.A; dA += P.a[t] || 0;
-    dL += P.s[t] || 0; dpD += (P.s[t] || 0) - (P.a[t] || 0) * pA;
+    dL += P.s[t] || 0; dX += (P.s[t] || 0) - (P.a[t] || 0) * X;
   }
   st.D += k * dD; st.A += k * dA;
-  if (pool !== false) {            // the same kill restricted to the neutral pool (our unentered picks)
-    st.L = (st.L || 0) + k * dL;   // lost pick mass
-    st.pD = (st.pD || 0) + k * dpD; st.pA = pA + k * dA;   // dead entry share, pairs included
+  if (pool === false) {            // the same kill restricted to OUT-of-pool games (today's / settled)
+    st.oD = (st.oD || 0) + k * dX; st.oA = X + k * dA;
+  } else {                         // ... and restricted to the neutral pool
+    st.L = (st.L || 0) + k * dL;
+    st.pD = (st.pD || 0) + k * dX; st.pA = X + k * dA;
   }
 }
 function legLosers(g, w) { return w === "TIE" ? [g.away, g.home] : [w === g.home ? g.away : g.home]; }
@@ -793,18 +795,17 @@ function gameOutOfPool(g) {
   if (lv.state && lv.state !== "pre") return true;
   return !!lv.date && lv.date === todayET();
 }
-/** Survival of an entry's neutral picks in one leg, given the leg's pool state st (legKill). Literal
- *  rule: our share of every pool team equals the field's share, NOT re-scaled for the out-of-pool
- *  games we are known to be off (the field's mass there is treated as a pick that cannot lose):
- *  - every pick unknown: the entry dies exactly like the field's pool holders do (st.pD = the field's
- *    dead share from pool games, pairs included — never "holds SEA twice"), so pool games wash out;
- *  - some picks known: each missing pick dies at the field's per-pick rate on the pool, lost mass
- *    st.L over picks-per-entry, less LX (the beaten opponents of our known picks, already inside L).
- *  An empty pool falls back to the 70% placeholder. */
+/** Survival of an entry's neutral picks in one leg, given the leg's kill state st (legKill). Rule
+ *  (user, Nov 5 2026): pool games must be a WASH — our unknown entries track the field's composition
+ *  inside every scenario, including after the out-of-pool (today's) results. So the entry survives
+ *  the pool games at r = (field survival of everything) / (field survival of out-of-pool kills only),
+ *  i.e. exactly like a field entry that survived today. A fully unknown entry takes r (its M/F is
+ *  then independent of every pool game); an entry with some picks known takes r^(missing/picks) —
+ *  one Sunday pick is less exposed than two. An empty pool falls back to the 70% placeholder. */
 function neutralSurv(x, st) {
   if (x.pool <= 1e-9) return Math.pow(PLACEHOLDER_WIN, x.miss);
-  if (x.miss >= x.k) return Math.max(0, 1 - (st.pD || 0));
-  return Math.pow(Math.max(0, 1 - Math.max(0, (st.L || 0) - x.LX) / x.k), x.miss);
+  const r = Math.min(1, Math.max(0, 1 - st.D) / Math.max(1e-9, 1 - (st.oD || 0)));
+  return x.miss >= x.k ? r : Math.pow(r, x.miss / x.k);
 }
 /** Field share (of entering) that dies to the placeholder: the entries the import doesn't assign. */
 function placeholderDead(fd, leg) {
@@ -919,7 +920,7 @@ function noPickInfo(c, b) {
  * denominator at those share sizes. */
 function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   const nL = legs.length;
-  const base = legs.map(() => ({ D: 0, A: 0, L: 0, pD: 0, pA: 0 }));   // per-leg kill state (+ pool-only copy)
+  const base = legs.map(() => ({ D: 0, A: 0, L: 0, pD: 0, pA: 0, oD: 0, oA: 0 }));   // per-leg kill state (+ pool / out-of-pool copies)
   const pairs = legs.map(leg => legPairs(state.field[c][leg.id], leg));
   // neutral pool per leg: the field's pick mass on games still open for an unentered pick (+ the
   // import's unassigned picks, which die at the placeholder rate below)
@@ -1027,7 +1028,7 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   }
 
   let ev = 0;
-  const cur = base.map(b => ({ D: b.D, A: b.A, L: b.L, pD: b.pD, pA: b.pA }));
+  const cur = base.map(b => ({ ...b }));
   const walk = (i, pr, winMask) => {
     if (pr < 1e-12) return;
     if (i === en.length) {
@@ -1666,7 +1667,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1793915820255";
+const BUILD_ID = "1793916157403";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
