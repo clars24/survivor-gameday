@@ -799,13 +799,13 @@ function gameOutOfPool(g) {
  *  (user, Nov 5 2026): pool games must be a WASH — our unknown entries track the field's composition
  *  inside every scenario, including after the out-of-pool (today's) results. So the entry survives
  *  the pool games at r = (field survival of everything) / (field survival of out-of-pool kills only),
- *  i.e. exactly like a field entry that survived today. A fully unknown entry takes r (its M/F is
- *  then independent of every pool game); an entry with some picks known takes r^(missing/picks) —
- *  one Sunday pick is less exposed than two. An empty pool falls back to the 70% placeholder. */
+ *  i.e. exactly like a field entry that survived today. EVERY entry with a missing pick takes r, so
+ *  its M/F is independent of every pool game — even an entry with one pick known (user, Nov 5 2026:
+ *  only today's game may show a swing; the fairer r^(missing/picks) for a one-pick-left entry was
+ *  rejected because it leaves Sunday rows non-zero). An empty pool falls back to the placeholder. */
 function neutralSurv(x, st) {
   if (x.pool <= 1e-9) return Math.pow(PLACEHOLDER_WIN, x.miss);
-  const r = Math.min(1, Math.max(0, 1 - st.D) / Math.max(1e-9, 1 - (st.oD || 0)));
-  return x.miss >= x.k ? r : Math.pow(r, x.miss / x.k);
+  return Math.min(1, Math.max(0, 1 - st.D) / Math.max(1e-9, 1 - (st.oD || 0)));
 }
 /** Field share (of entering) that dies to the placeholder: the entries the import doesn't assign. */
 function placeholderDead(fd, leg) {
@@ -1231,7 +1231,8 @@ function rootingGuide(w) {
         // number would be pure prior), but must-win detection below still runs — dead is dead
         // whatever the field did.
         if (!fieldHiddenFor(c, w, g)) {
-          const d = eh.evExp - ea.evExp;
+          let d = eh.evExp - ea.evExp;
+          if (Math.abs(d) < 2) d = 0;      // < $2 is enumeration/fold residue, not a swing
           per.push({ c, d });
           dTot += d;
         }
@@ -1667,7 +1668,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1793916157403";
+const BUILD_ID = "1793916455447";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
