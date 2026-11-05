@@ -757,17 +757,55 @@ function legPairs(fd, leg) {
 }
 /** Kill the holders of `losers` (one team, or both on a TIE) in a leg state {D, A}; weight w in [0,1]
  *  applies an EXPECTED loss (w = chance that side loses) for games folded rather than enumerated. */
-function legKill(st, P, losers, w) {
+function legKill(st, P, losers, w, pool) {
   const k = w == null ? 1 : w;
-  let dD = 0, dA = 0;
-  for (const t of losers) { dD += (P.s[t] || 0) - (P.a[t] || 0) * st.A; dA += P.a[t] || 0; }
+  let dD = 0, dA = 0, dL = 0, dpD = 0;
+  const pA = st.pA || 0;
+  for (const t of losers) {
+    dD += (P.s[t] || 0) - (P.a[t] || 0) * st.A; dA += P.a[t] || 0;
+    dL += P.s[t] || 0; dpD += (P.s[t] || 0) - (P.a[t] || 0) * pA;
+  }
   st.D += k * dD; st.A += k * dA;
+  if (pool !== false) {            // the same kill restricted to the neutral pool (our unentered picks)
+    st.L = (st.L || 0) + k * dL;   // lost pick mass
+    st.pD = (st.pD || 0) + k * dpD; st.pA = pA + k * dA;   // dead entry share, pairs included
+  }
 }
 function legLosers(g, w) { return w === "TIE" ? [g.away, g.home] : [w === g.home ? g.away : g.home]; }
 function legSurv(st) { return Math.max(0, 1 - st.D); }
-/* Placeholder until a week's picks are loaded (user, Oct 29 2026): any entry whose pick for the leg isn't
- * known — ours or the field's — is assumed to be on a team that wins 70% of the time. */
+/* Placeholder until a week's picks are loaded (user, Oct 29 2026): any FIELD entry whose pick for the leg
+ * isn't assigned by the import is assumed to be on a team that wins 70% of the time.
+ * OUR entries' missing picks are instead NEUTRAL (user, Nov 5 2026): each one is assumed to follow the
+ * field's pick distribution for that leg (excluding the games of the entry's known picks), so in every
+ * scenario it survives at the field's own pick-survival rate and the games we haven't picked yet wash out
+ * of our rooting numbers — only the picks we HAVE entered (e.g. a Thursday leg) move the needle. The 70%
+ * placeholder is the fallback for a leg with no field loaded. */
 const PLACEHOLDER_WIN = 0.70;
+/** The neutral POOL is the field's pick mass on games still open for a pick we haven't entered: a game
+ *  that is settled, in progress, or kicks off today (ET) is out of it — by then Chris has told us our
+ *  picks there (user, Nov 5 2026: "our % matches field % for any team not playing today"). */
+function todayET() { return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }); }
+function gameOutOfPool(g) {
+  const k = gameKey(g);
+  if (state.results[k]) return true;
+  const lv = live.games[k];
+  if (!lv) return false;
+  if (lv.state && lv.state !== "pre") return true;
+  return !!lv.date && lv.date === todayET();
+}
+/** Survival of an entry's neutral picks in one leg, given the leg's pool state st (legKill). Literal
+ *  rule: our share of every pool team equals the field's share, NOT re-scaled for the out-of-pool
+ *  games we are known to be off (the field's mass there is treated as a pick that cannot lose):
+ *  - every pick unknown: the entry dies exactly like the field's pool holders do (st.pD = the field's
+ *    dead share from pool games, pairs included — never "holds SEA twice"), so pool games wash out;
+ *  - some picks known: each missing pick dies at the field's per-pick rate on the pool, lost mass
+ *    st.L over picks-per-entry, less LX (the beaten opponents of our known picks, already inside L).
+ *  An empty pool falls back to the 70% placeholder. */
+function neutralSurv(x, st) {
+  if (x.pool <= 1e-9) return Math.pow(PLACEHOLDER_WIN, x.miss);
+  if (x.miss >= x.k) return Math.max(0, 1 - (st.pD || 0));
+  return Math.pow(Math.max(0, 1 - Math.max(0, (st.L || 0) - x.LX) / x.k), x.miss);
+}
 /** Field share (of entering) that dies to the placeholder: the entries the import doesn't assign. */
 function placeholderDead(fd, leg) {
   const k = leg.picks || 1;
@@ -881,12 +919,23 @@ function noPickInfo(c, b) {
  * denominator at those share sizes. */
 function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   const nL = legs.length;
-  const base = legs.map(() => ({ D: 0, A: 0 }));   // per-leg dead share + lost-team pair weight (legKill)
+  const base = legs.map(() => ({ D: 0, A: 0, L: 0, pD: 0, pA: 0 }));   // per-leg kill state (+ pool-only copy)
   const pairs = legs.map(leg => legPairs(state.field[c][leg.id], leg));
+  // neutral pool per leg: the field's pick mass on games still open for an unentered pick (+ the
+  // import's unassigned picks, which die at the placeholder rate below)
+  const poolMass = legs.map((leg, li) => {
+    const fd = state.field[c][leg.id];
+    if (!isHeadCount(fd)) return 0;
+    let m = 0, assigned = 0;
+    for (const t in fd.own) assigned += Number(fd.own[t]) || 0;
+    for (const g of leg.games) if (!gameOutOfPool(g)) m += (pairs[li].s[g.home] || 0) + (pairs[li].s[g.away] || 0);
+    return m + Math.max(0, (leg.picks || 1) - assigned / Number(fd.alive));
+  });
   const pend = new Map();                   // gameKey -> pending game info
   legs.forEach((leg, li) => {
     const fd = state.field[c][leg.id], haveOwn = !!(fd && fd.alive > 0), multi = leg.picks > 1;
     for (const g of leg.games) {
+      const inPool = !gameOutOfPool(g);
       // ownership reveals in waves as games lock: with an import in hand, a game that has
       // started (or appears in the import) is revealed — absent teams there really are 0.
       // A not-yet-started game missing from the import is simply hidden, not zero-owned.
@@ -898,12 +947,12 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
       const sH = revealed ? (fd.own[g.home] || 0) / fd.alive : 0;
       const wnr = winnerOf(g, hyp);
       if (wnr) {
-        if (revealed) legKill(base[li], pairs[li], legLosers(g, wnr));
+        if (revealed) legKill(base[li], pairs[li], legLosers(g, wnr), null, inPool);
         continue;
       }
       const k = gameKey(g);
       let e = pend.get(k);
-      if (!e) { e = { g, k, p: winP(g.home, g), at: [], ours: false }; pend.set(k, e); }
+      if (!e) { e = { g, k, p: winP(g.home, g), at: [], ours: false, inPool }; pend.set(k, e); }
       e.at.push({ li, sA, sH, multi, revealed });
     }
   });
@@ -924,11 +973,24 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
     }
     if (dead) continue;
     for (const r of req) pend.get(r.k).ours = true;
-    const miss = missingPicks(c, n, legs);
-    const key = req.map(r => r.k + (r.home ? "H" : "A")).sort().join("|") + "#" + miss;
+    // per leg: how many picks are missing (neutral) and the pick mass of this entry's known-pick games
+    const nl = legs.map((leg, li) => {
+      const ps = pickTeams((state.mine[c][n] || {})[leg.id]);
+      const P = pairs[li];
+      let Xm = 0, LX = 0;
+      for (const t of ps) {
+        const g = gameOfTeam(leg, t); if (!g || gameOutOfPool(g)) continue;   // only known picks inside the pool
+        const o = t === g.home ? g.away : g.home;
+        Xm += (P.s[t] || 0) + (P.s[o] || 0); LX += P.s[o] || 0;
+      }
+      return { miss: Math.max(0, (leg.picks || 1) - ps.length), k: leg.picks || 1, pool: poolMass[li], Xm, LX,
+               have: isHeadCount(state.field[c][leg.id]) };
+    });
+    const key = req.map(r => r.k + (r.home ? "H" : "A")).sort().join("|") + "#" +
+                nl.map(x => x.miss + ":" + x.Xm.toFixed(4)).join(",");
     const s = sigs.get(key);
     const w = shareOf(c, n);
-    if (s) { s.cnt += w; s.heads++; } else sigs.set(key, { cnt: w, heads: 1, req, ph: Math.pow(PLACEHOLDER_WIN, miss) });
+    if (s) { s.cnt += w; s.heads++; } else sigs.set(key, { cnt: w, heads: 1, req, nl });
   }
   // Field entries the import doesn't assign (picks not revealed yet, or no import at all) die at the
   // placeholder rate — a fixed amount, blind to results, hypotheticals and live odds.
@@ -944,14 +1006,14 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   for (const e of games.slice(12)) {
     for (const a of e.at) {
       if (!a.revealed) continue;
-      legKill(base[a.li], pairs[a.li], [e.g.away], e.p);       // away pickers die when home wins
-      legKill(base[a.li], pairs[a.li], [e.g.home], 1 - e.p);
+      legKill(base[a.li], pairs[a.li], [e.g.away], e.p, e.inPool);       // away pickers die when home wins
+      legKill(base[a.li], pairs[a.li], [e.g.home], 1 - e.p, e.inPool);
     }
   }
   const bit = new Map(en.map((e, i) => [e.k, i]));
   const sigList = [];
-  for (const { cnt, heads, req, ph } of sigs.values()) {
-    let mask = 0, want = 0, fold = ph, ok = true;
+  for (const { cnt, heads, req, nl } of sigs.values()) {
+    let mask = 0, want = 0, fold = 1, ok = true;
     for (const r of req) {
       const b = bit.get(r.k);
       if (b == null) { const e = pend.get(r.k); fold *= r.home ? e.p : 1 - e.p; }
@@ -961,18 +1023,25 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
         mask |= m; if (r.home) want |= m;
       }
     }
-    if (ok && fold > 0) sigList.push({ mask, want, val: cnt * fold, heads: heads * fold });
+    if (ok && fold > 0) sigList.push({ mask, want, val: cnt * fold, heads: heads * fold, nl });
   }
 
   let ev = 0;
-  const cur = base.map(b => ({ D: b.D, A: b.A }));
+  const cur = base.map(b => ({ D: b.D, A: b.A, L: b.L, pD: b.pD, pA: b.pA }));
   const walk = (i, pr, winMask) => {
     if (pr < 1e-12) return;
     if (i === en.length) {
       let F = Fin0;
       for (let li = 0; li < nL; li++) F *= legSurv(cur[li]);
       let M = 0, Mh = 0;          // M = our owned share of the alive entries; Mh = alive heads we hold
-      for (const s of sigList) if ((winMask & s.mask) === s.want) { M += s.val; Mh += s.heads; }
+      for (const s of sigList) if ((winMask & s.mask) === s.want) {
+        let f = 1;                  // neutral (field-distributed) survival of the entry's missing picks
+        for (let li = 0; li < nL; li++) {
+          const x = s.nl[li]; if (!x.miss) continue;
+          f *= x.have ? neutralSurv(x, cur[li]) : Math.pow(PLACEHOLDER_WIN, x.miss);
+        }
+        M += s.val * f; Mh += s.heads * f;
+      }
       if (M > 1e-9) ev += pr * pot * M / Math.max(F, Mh);
       // whole field dies with us on the same slate: cohort split among everyone entering
       else if (F < 0.5 && Min0 > 0) ev += pr * pot * Min0 / Math.max(Fin0, 1);
@@ -985,11 +1054,11 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
       const undo = [];
       for (const a of e.at) {
         if (!a.revealed) continue;
-        undo.push([a.li, cur[a.li].D, cur[a.li].A]);
-        legKill(cur[a.li], pairs[a.li], [side ? e.g.away : e.g.home]);
+        undo.push([a.li, { ...cur[a.li] }]);
+        legKill(cur[a.li], pairs[a.li], [side ? e.g.away : e.g.home], null, e.inPool);
       }
       walk(i + 1, pr * p2, side ? (winMask | (1 << i)) : winMask);
-      for (let u = undo.length - 1; u >= 0; u--) { const [li, D, A] = undo[u]; cur[li].D = D; cur[li].A = A; }
+      for (let u = undo.length - 1; u >= 0; u--) { const [li, st] = undo[u]; Object.assign(cur[li], st); }
     }
   };
   walk(0, 1, 0);
@@ -1032,17 +1101,34 @@ function contestWeekEV(c, w, hyp) {
   const rows = [];
   const missingField = [];
 
+  // expected survival of one neutral (field-distributed) pick per leg, for our entries' missing picks
+  const eNeut = legs.map(leg => {
+    const fd = state.field[c][leg.id];
+    if (!isHeadCount(fd)) return PLACEHOLDER_WIN;
+    let L = placeholderDead(fd, leg), pool = L > 0 ? L / (1 - PLACEHOLDER_WIN) : 0;
+    for (const g of leg.games) {
+      if (gameOutOfPool(g)) continue;
+      const wnr = winnerOf(g, hyp);
+      const sA = (fd.own[g.away] || 0) / fd.alive, sH = (fd.own[g.home] || 0) / fd.alive;
+      pool += sA + sH;
+      if (wnr) { for (const l of legLosers(g, wnr)) L += l === g.away ? sA : sH; }
+      else L += sA * (1 - winP(g.away, g)) + sH * (1 - winP(g.home, g));
+    }
+    return pool > 1e-9 ? Math.max(0, 1 - L / pool) : PLACEHOLDER_WIN;
+  });
   for (const n of aliveNames) {
     let p = 1;
-    for (const leg of legs) {
-      for (const t of pickTeams((state.mine[c][n] || {})[leg.id])) {
+    legs.forEach((leg, li) => {
+      const ps = pickTeams((state.mine[c][n] || {})[leg.id]);
+      for (const t of ps) {
         const g = gameOfTeam(leg, t);
         if (!g) { p = 0; continue; }
         const wnr = winnerOf(g, hyp);
         p *= wnr ? (wnr === t ? 1 : 0) : winP(t, g);
       }
-    }
-    eM += shareOf(c, n) * p * Math.pow(PLACEHOLDER_WIN, missingPicks(c, n, legs));
+      p *= Math.pow(eNeut[li], Math.max(0, (leg.picks || 1) - ps.length));
+    });
+    eM += shareOf(c, n) * p;
   }
 
   for (const leg of legs) {
@@ -1213,7 +1299,8 @@ async function livePoll(force) {
       const lv = live.games[k] = {
         state: st.state, detail: st.shortDetail || "",
         as: Number((flip ? home : away).score), hs: Number((flip ? away : home).score), id: ev.id,
-        wp: prev.wp, mkt: prev.mkt, flip
+        wp: prev.wp, mkt: prev.mkt, flip,
+        date: ev.date ? new Date(ev.date).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : null
       };
       const odds = comp.odds && comp.odds[0];   // ESPN keeps the pregame line on the feed all day
       if (odds && odds.details) {
@@ -1579,7 +1666,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1793468859459";
+const BUILD_ID = "1793915820255";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
