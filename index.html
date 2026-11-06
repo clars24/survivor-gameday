@@ -897,7 +897,8 @@ function noPickInfo(c, b) {
   const prev = fieldPrevEntering(c, i0);
   const field = prev && prev.n > 0 ? Math.max(0, Math.round(prev.n - Number(fd.alive))) : null;
   let ours = 0;
-  for (const n of (state.names[c] || [])) {
+  // a PROJECTED field is not a pick reveal: our entries without picks are neutral there, not no-picks
+  for (const n of (fd.src === "projected" ? [] : state.names[c] || [])) {
     if (!myEntryAliveUpTo(c, n, i0, null)) continue;
     for (const leg of b.legs) {
       const lfd = state.field[c][leg.id];
@@ -918,7 +919,7 @@ function noPickInfo(c, b) {
  * field-only games join largest-share first up to 12 total (4096 branches), and the
  * leftovers fold in at expected survival — exact in the numerator, sub-dollar noise in the
  * denominator at those share sizes. */
-function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
+function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot, out) {
   const nL = legs.length;
   const base = legs.map(() => ({ D: 0, A: 0, L: 0, pD: 0, pA: 0, oD: 0, oA: 0 }));   // per-leg kill state (+ pool / out-of-pool copies)
   const pairs = legs.map(leg => legPairs(state.field[c][leg.id], leg));
@@ -1003,8 +1004,13 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   const games = [...pend.values()];
   const wt = e => Math.max(...e.at.map(a => Math.max(a.sA, a.sH)));
   games.sort((a, b) => (b.ours - a.ours) || (wt(b) - wt(a)));
-  const en = games.slice(0, 12);
-  for (const e of games.slice(12)) {
+  // Enumeration budget (Nov 6 2026, ×2-pick weeks with 20+ exact combos): every game WE hold a pick in is
+  // enumerated — folding one of our games would price its entries independently of the field's thinning
+  // there — then the largest field shares, 12 games minimum, 16 at most (65,536 branches).
+  const SCEN_MIN = 12, SCEN_MAX = 16;
+  const cap = Math.min(SCEN_MAX, Math.max(SCEN_MIN, games.filter(e => e.ours).length));
+  const en = games.slice(0, cap);
+  for (const e of games.slice(cap)) {
     for (const a of e.at) {
       if (!a.revealed) continue;
       legKill(base[a.li], pairs[a.li], [e.g.away], e.p, e.inPool);       // away pickers die when home wins
@@ -1028,6 +1034,12 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
   }
 
   let ev = 0;
+  // Conditional EVs from the SAME walk (Nov 6 2026): every leaf's value is also banked per enumerated game
+  // and side, so E[EV | game i home] = condAcc[i][1] / p_i. The rooting guide used to re-enumerate the whole
+  // slate once per game per side (31 walks per contest); a ×2 week with 20+ combos on a dozen games made
+  // that a 5-second render. Folded games (beyond the cap) still get the per-hypothesis walk.
+  const condAcc = en.map(() => [0, 0]);
+  const nEn = en.length;
   const cur = base.map(b => ({ ...b }));
   const walk = (i, pr, winMask) => {
     if (pr < 1e-12) return;
@@ -1043,9 +1055,14 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
         }
         M += s.val * f; Mh += s.heads * f;
       }
-      if (M > 1e-9) ev += pr * pot * M / Math.max(F, Mh);
+      let v = 0;
+      if (M > 1e-9) v = pr * pot * M / Math.max(F, Mh);
       // whole field dies with us on the same slate: cohort split among everyone entering
-      else if (F < 0.5 && Min0 > 0) ev += pr * pot * Min0 / Math.max(Fin0, 1);
+      else if (F < 0.5 && Min0 > 0) v = pr * pot * Min0 / Math.max(Fin0, 1);
+      if (v > 0) {
+        ev += v;
+        for (let j = 0; j < nEn; j++) condAcc[j][(winMask >> j) & 1] += v;
+      }
       return;
     }
     const e = en[i];
@@ -1063,10 +1080,16 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot) {
     }
   };
   walk(0, 1, 0);
+  if (out) {
+    out.cond = {};
+    en.forEach((e, i) => {
+      if (e.p > 1e-9 && 1 - e.p > 1e-9) out.cond[e.k] = { home: condAcc[i][1] / e.p, away: condAcc[i][0] / (1 - e.p) };
+    });
+  }
   return ev;
 }
 
-function contestWeekEV(c, w, hyp) {
+function contestWeekEV(c, w, hyp, opts) {
   const legs = legsForWeek(c, w);
   if (!legs.length) return null;
   const i0 = legIndex(c, legs[0].id);
@@ -1191,11 +1214,13 @@ function contestWeekEV(c, w, hyp) {
   const byTeam = {};
   for (const r of rows) byTeam[r.team] = r;
   const evNow = cohortEV != null ? cohortEV : (M > 0 ? pot * M / Math.max(F, Mn) : 0);
-  const evExp = cohortEV != null ? cohortEV : scenarioEV(c, legs, hyp, entering, FinX, Min0, pot);
+  const scen = {};
+  const evExp = cohortEV != null ? cohortEV : opts && opts.noScen ? null : scenarioEV(c, legs, hyp, entering, FinX, Min0, pot, scen);
   return {
+    cond: scen.cond || null,
     contest: c, legs, pot, src: fld.src, exact: fld.exact && !missingField.length,
     Fin0, FinX, Min0, Min0N, F, M, Mn, eF, eM, evNow, evExp, cohortLeg, rows, byTeam, missingField,
-    noNames: !names.length
+    eNeut, noNames: !names.length
   };
 }
 /* A game's $ swing for a contest is unknowable while the field's picks there are hidden —
@@ -1222,9 +1247,13 @@ function rootingGuide(w) {
     const must = {};   // team -> contests where that team losing wipes out our last alive entries
     if (!settled) {
       for (const c of CONTEST_KEYS) {
-        const eh = contestWeekEV(c, w, { [k]: g.home });
-        const ea = contestWeekEV(c, w, { [k]: g.away });
+        // enumerated in the base walk: its conditional EVs are already known — only the settled-basis
+        // numbers (M, evNow, for must-win) need the cheap pass. A folded game re-enumerates as before.
+        const cond = base[c] && base[c].cond && base[c].cond[k];
+        const eh = contestWeekEV(c, w, { [k]: g.home }, { noScen: !!cond });
+        const ea = contestWeekEV(c, w, { [k]: g.away }, { noScen: !!cond });
         if (!eh || !ea) continue;
+        if (cond) { eh.evExp = cond.home; ea.evExp = cond.away; }
         // EXPECTED EV difference: this game forced each way, every other pending game weighted by its
         // win probability. Low-owned teams price correctly — conditional on them winning, the rest of
         // the field is expected to thin around you. A hidden-ownership game reports no swing (the
@@ -1668,7 +1697,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1793916455447";
+const BUILD_ID = "1794008581973";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -2119,7 +2148,7 @@ function renderContestView(c, b) {
   if (!b) { cv.innerHTML = ""; return; }
   // pasted-but-not-yet-imported text survives re-renders (it lives only in the DOM)
   const keepPaste = {};
-  cv.querySelectorAll("textarea.impbox").forEach(t => { if (t.value) keepPaste[t.dataset.c] = t.value; });
+  cv.querySelectorAll("textarea.impbox, textarea.ourbox").forEach(t => { if (t.value) keepPaste[t.className.split(" ")[0] + ":" + t.dataset.c] = t.value; });
   const legLabels = b.legs.map(l => l.label + (l.picks > 1 ? " ×2" : "")).join(" + ");
   const potNote = Number(state.money.pots[c]) > 0 ? "" : C.potFixed ? "guaranteed" : `${fmtMoney(feeOf(c))} × ${fmtN(startN(c))}`;
   const est = b.exact ? "" : ` <span class="warn2" title="No field import for ${b.missingField.join(", ") || "an earlier leg"} — field size is carried forward / defaulted">≈</span>`;
@@ -2180,7 +2209,7 @@ function renderContestView(c, b) {
     return `<tr class="${r.res ? (lost ? "lost" : "won") : isLiveGame(r.g) ? "livegame" : ""}">
       <td class="match">${resBtn(r.g, r.t, r.res)}<span class="oppn">${r.t === r.g.home ? "vs " + r.g.away : "@ " + r.g.home}${b.legs.length > 1 ? " · " + r.leg.id : ""}</span>${liveTag(r.g, r.t)}${status}</td>
       <td class="num s mh">${r.res ? (r.res === r.t ? "100%" : "0%") : Math.round(r.wp * 100) + "%"}</td>
-      <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : "gold"}">${r.s.mine || ""}</td>
+      <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : "gold"}">${r.s.mine ? fmtEnt(r.s.mine) : ""}</td>
       <td class="num s mh">${r.s.mine ? r.s.minePct.toFixed(1) + "%" : ""}</td>
       <td class="num ${r.res ? (r.res === r.t ? "owin" : "olose") : ""}">${r.s.fieldCnt == null ? "—" : fmtN(r.s.fieldCnt)}</td>
       <td class="num s mh">${r.s.fieldPct == null ? "—" : r.s.fieldPct.toFixed(1) + "%"}</td>
@@ -2283,7 +2312,7 @@ function renderContestView(c, b) {
         return `<tr class="lost">
           <td class="match"><span class="res no">No Pick</span><span class="oppn">eliminated — no selection</span></td>
           <td class="num s mh">0%</td>
-          <td class="num ${np.ours ? "olose" : ""}">${np.ours || ""}</td>
+          <td class="num ${np.ours ? "olose" : ""}">${np.ours ? fmtEnt(np.ours) : ""}</td>
           <td class="num s mh">${np.ours ? np.oursPct.toFixed(1) + "%" : ""}</td>
           <td class="num ${np.field ? "olose" : ""}">${np.field == null ? "—" : fmtN(np.field)}</td>
           <td class="num s mh">${np.field != null && np.prevN > 0 ? (100 * np.field / np.prevN).toFixed(1) + "%" : "—"}</td>
@@ -2293,13 +2322,14 @@ function renderContestView(c, b) {
           <td class="num s2">—</td>
         </tr>`;
       })()}</tbody></table></div>
-      <details data-id="picks-${c}" class="ourpicks"><summary>Our picks — ${fmtEnt(b.Min0)} entries</summary>${pickEditorHtml(c, b)}</details>
+      ${comboTableHtml(c, b)}
+      <details data-id="picks-${c}" class="ourpicks"><summary>Our picks — ${fmtEnt(b.Min0)} entries${b.Min0 !== b.Min0N ? ` (${b.Min0N} heads)` : ""}</summary>${combosHtml(c, b)}${pickEditorHtml(c, b)}</details>
       <details data-id="setup-${c}" class="setwrap"><summary>Setup &amp; import</summary>${setupHtml(c)}</details>`}
   </div>`;
   renderContestView._b = b;
   if (setHtml(cv, cvHtml)) {
     trackDetails(cv);
-    cv.querySelectorAll("textarea.impbox").forEach(t => { if (keepPaste[t.dataset.c]) t.value = keepPaste[t.dataset.c]; });
+    cv.querySelectorAll("textarea.impbox, textarea.ourbox").forEach(t => { const v = keepPaste[t.className.split(" ")[0] + ":" + t.dataset.c]; if (v) t.value = v; });
     cv.querySelectorAll(".subtabs button").forEach(btn => btn.onclick = () => {
       subTab = btn.dataset.s; render();
     });
@@ -2383,6 +2413,191 @@ function renderEntList(c, b) {
   });
 }
 
+/* ---- Our combos: one row per alive entry with its exact picks for the week's legs. An entry advances
+ * only if EVERY pick wins, so its advance rate is the product of the picks' win probabilities (a settled
+ * pick is 1 or 0; a pick not entered yet survives at the field's neutral rate, eNeut). The live EV engine
+ * prices the same combos jointly with the field (scenarioEV) — this table is the per-entry view of it. */
+/** Aggregated by pick set: "KC + NYG — 3 entries (2.04 owned), 61% × 41% = 25% advance". The field column
+ *  counts field entries holding the exact same pair when the week's import is entry-level (a projection
+ *  or per-team totals never carry pairs). */
+function comboTableHtml(c, b) {
+  const i0 = legIndex(c, b.legs[0].id);
+  const names = (state.names[c] || []).filter(n => myEntryAliveUpTo(c, n, i0, null));
+  if (!names.length || !b.legs.some(l => l.picks > 1)) return "";
+  const groups = new Map();
+  for (const n of names) {
+    const picks = [];
+    let missing = 0;
+    for (const leg of b.legs) {
+      const ps = pickTeams((state.mine[c][n] || {})[leg.id]);
+      for (const t of ps) picks.push({ t, leg });
+      missing += Math.max(0, (leg.picks || 1) - ps.length);
+    }
+    const key = picks.map(p => p.t).sort().join("+") + (missing ? "+?" : "");
+    const g = groups.get(key) || { key, picks, missing, names: [], w: 0 };
+    g.names.push(n); g.w += shareOf(c, n);
+    groups.set(key, g);
+  }
+  // field pairs from the entry pool (exact matches of the same pick set, this week's legs)
+  const P = pool[c];
+  const havePool = P && P.names.length && b.legs.every(l => (P.legs[l.id] || []).some(x => x != null));
+  let fieldPairs = null;
+  if (havePool) {
+    fieldPairs = new Map();
+    for (let i = 0; i < P.names.length; i++) {
+      const ps = [];
+      for (const l of b.legs) ps.push(...pickTeams((P.legs[l.id] || [])[i]));
+      if (!ps.length) continue;
+      const k = ps.sort().join("+");
+      fieldPairs.set(k, (fieldPairs.get(k) || 0) + 1);
+    }
+  }
+  const rows = [...groups.values()].map(g => {
+    let adv = 1, lost = false, pending = false;
+    const cells = g.picks.map(({ t, leg }) => {
+      const gm = gameOfTeam(leg, t);
+      if (!gm) { lost = true; return `<span class="stL">${logo(t)} ${t} ?</span>`; }
+      const w = winnerOf(gm, null);
+      const p = w ? (w === t ? 1 : 0) : winP(t, gm);
+      if (w && w !== t) lost = true; else if (!w) pending = true;
+      adv *= p;
+      const cls = w ? (w === t ? "stW" : "stL") : "";
+      return `<span class="${cls}" style="white-space:nowrap">${logo(t)} <b>${t}</b> <span class="s2">${Math.round(p * 100)}%</span></span>`;
+    });
+    for (let k = 0; k < g.missing; k++) {
+      const li = 0, pn = b.eNeut ? b.eNeut[li] : PLACEHOLDER_WIN;
+      adv *= pn; pending = true;
+      cells.push(`<span class="s2" style="white-space:nowrap" title="pick not entered: survives at the field's own rate">neutral ${Math.round(pn * 100)}%</span>`);
+    }
+    const status = lost ? `<span class="stL">✗ out</span>` : !pending ? `<span class="stW">✓ through</span>` : `<span class="stP">pending</span>`;
+    const fp = fieldPairs ? (fieldPairs.get(g.key) || 0) : null;
+    return { g, cells: cells.join(" <span class='s2'>+</span> "), adv: lost ? 0 : adv, lost, status, fp };
+  });
+  rows.sort((a, b2) => (a.lost - b2.lost) || (b2.g.w - a.g.w) || (b2.adv - a.adv));
+  const body = rows.map(r => `<tr class="${r.lost ? "lost" : r.g.picks.some(p => isLiveGame(gameOfTeam(p.leg, p.t))) ? "livegame" : ""}">
+      <td style="white-space:nowrap">${r.cells}</td>
+      <td class="num gold" title="${esc(r.g.names.join(", "))}">${fmtEnt(Math.round(r.g.w * 100) / 100)}${r.g.names.length !== r.g.w ? ` <span class="s2">/ ${r.g.names.length}</span>` : ""}</td>
+      <td class="num s mh">${b.Min0 ? (100 * r.g.w / b.Min0).toFixed(1) + "%" : ""}</td>
+      <td class="num">${r.fp == null ? "—" : fmtN(r.fp)}</td>
+      <td class="num" style="font-weight:600">${r.lost ? "0%" : (100 * r.adv).toFixed(1) + "%"}</td>
+      <td class="num">${r.status}</td></tr>`).join("");
+  return `<div class="hint" style="margin-top:14px"><b>Our combos</b> — every pick in a combo must win for the entry to advance, so its advance rate is the
+      product of the win probabilities. Entries = ownership-weighted (whole heads after the slash); hover for the entry names. Field = field entries on the
+      exact same pair${fieldPairs ? "" : " (needs an entry-level import — a projection has no pairs)"}.</div>
+    <div style="overflow-x:auto"><table class="games even"><thead><tr>
+      <th>Combo</th><th class="num">Entries</th><th class="num mh">Ours %</th><th class="num">Field</th><th class="num">Advance</th><th class="num">Status</th></tr></thead>
+      <tbody>${body}</tbody></table></div>`;
+}
+function combosHtml(c, b) {
+  const i0 = legIndex(c, b.legs[0].id);
+  const names = (state.names[c] || []).filter(n => myEntryAliveUpTo(c, n, i0, null));
+  if (!names.length) return "";
+  const rows = names.map(n => {
+    let adv = 1, lost = false, pending = false, missing = 0;
+    const cells = b.legs.map((leg, li) => {
+      const ps = pickTeams((state.mine[c][n] || {})[leg.id]);
+      const parts = ps.map(t => {
+        const g = gameOfTeam(leg, t);
+        if (!g) { lost = true; return `<span class="stL">${logo(t)} ${t} ?</span>`; }
+        const w = winnerOf(g, null);
+        const p = w ? (w === t ? 1 : 0) : winP(t, g);
+        if (w && w !== t) lost = true; else if (!w) pending = true;
+        adv *= p;
+        const cls = w ? (w === t ? "stW" : "stL") : "";
+        return `<span class="${cls}" style="white-space:nowrap">${logo(t)} ${t} <span class="s2">${Math.round(p * 100)}%</span></span>`;
+      });
+      const miss = Math.max(0, (leg.picks || 1) - ps.length);
+      for (let k = 0; k < miss; k++) {
+        const pn = b.eNeut ? b.eNeut[li] : PLACEHOLDER_WIN;
+        adv *= pn; missing++; pending = true;
+        parts.push(`<span class="s2" style="white-space:nowrap" title="pick not entered: survives at the field's own rate">neutral ${Math.round(pn * 100)}%</span>`);
+      }
+      return parts.join(" <span class='s2'>+</span> ");
+    }).join(" <span class='s2'>·</span> ");
+    const sh = shareOf(c, n);
+    const status = lost ? `<span class="stL">✗ out</span>` : !pending ? `<span class="stW">✓ through</span>` : `<span class="stP">pending</span>`;
+    return { n, sh, cells, adv: lost ? 0 : adv, lost, pending, missing, status };
+  });
+  rows.sort((a, b2) => (a.lost - b2.lost) || (b2.adv - a.adv) || a.n.localeCompare(b2.n));
+  const eM = rows.reduce((x, r) => x + r.sh * r.adv, 0);
+  const anyMissing = rows.some(r => r.missing);
+  const multi = b.legs.some(l => l.picks > 1);
+  const body = rows.map(r => `<tr class="${r.lost ? "dead" : ""}">
+      <td>${esc(r.n)}${r.sh < 1 ? ` <span class="s2">(${Math.round(r.sh * 100)}% owned)</span>` : ""}</td>
+      <td style="white-space:nowrap">${r.cells}</td>
+      <td class="num" style="font-weight:600">${r.lost ? "0%" : (100 * r.adv).toFixed(1) + "%"}</td>
+      <td class="num">${r.status}</td></tr>`).join("");
+  return `<div class="hint" style="margin-top:8px"><b>Advance rate</b> = product of every pick's win probability${multi ? " — on a ×2 leg both teams must win" : ""}${anyMissing ? "; a pick not entered yet survives at the field's neutral rate" : ""}.
+      Expected survivors <b>${fmtEnt(Math.round(eM * 100) / 100)}</b> of ${fmtEnt(b.Min0)} owned entries (ownership-weighted).</div>
+    <div style="overflow-x:auto"><table class="edit"><thead><tr><th>Entry</th><th>Picks · win %</th><th class="num">Advance</th><th class="num">Status</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+/* ---- "Our picks" paste loader: NAME, TEAM[, TEAM] [@pct] per line. Writes state.mine (never the field),
+ * adds names it doesn't know to the roster, and "@68%" (or a default ownership typed next to the box) sets
+ * our share of the entry. Separators: comma, tab, colon, "+", "/" — or plain spaces, the teams are the
+ * trailing tokens. Built for the ×2 weeks when Chris hands over the exact combos (Nov 6 2026). */
+function parseOurPicks(text, c, legId) {
+  const leg = legById(c, legId), width = leg ? leg.picks : 1;
+  const rows = [], bad = [];
+  for (const raw0 of String(text || "").split(/\r?\n/)) {
+    let raw = raw0.trim();
+    if (!raw || /^(entry|name)\b.*(pick|team|selection)/i.test(raw)) continue;
+    let share = null;
+    const m = raw.match(/^(.*?)\s*@\s*(\d+(?:\.\d+)?)\s*%?\s*$/);
+    if (m) { raw = m[1].trim(); share = Number(m[2]); if (share > 1) share /= 100; }
+    let parts = raw.split(/\t|,|:|\s\+\s|\s*\/\s*|\s{2,}/).map(x => x.trim()).filter(Boolean);
+    if (parts.length === 1) parts = raw.split(/\s+/);
+    const picks = [];
+    while (parts.length > 1 && teamTok(parts[parts.length - 1])) picks.unshift(teamTok(parts.pop()));
+    const name = parts.join(" ").trim();
+    if (!name || !picks.length || picks.length > width) { bad.push(raw0.trim() + (picks.length > width ? " (too many picks)" : "")); continue; }
+    rows.push({ name, picks, share });
+  }
+  return { rows, bad, width };
+}
+function loadOurPicks(c) {
+  const box = document.querySelector(`textarea.ourbox[data-c="${c}"]`);
+  const legSel = document.querySelector(`select.ourlegsel[data-c="${c}"]`);
+  const defIn = document.querySelector(`input.oursharein[data-c="${c}"]`);
+  const stat = $(`ourstat-${c}`);
+  const legId = legSel.value;
+  const { rows, bad, width } = parseOurPicks(box.value, c, legId);
+  if (!rows.length) { stat.textContent = "✗ nothing parsed — one entry per line: NAME, TEAM" + (width > 1 ? ", TEAM" : "") + " [@68%]"; return; }
+  let def = parseFloat(String(defIn && defIn.value || "").replace(/[%\s]/g, ""));
+  def = def > 0 ? (def > 1 ? def / 100 : def) : null;
+  const exact = myNameSet(c);
+  let added = 0, partial = 0, dup = 0;
+  const seen = new Set(), reused = [];
+  if (!state.share) state.share = {};
+  if (!state.share[c]) state.share[c] = {};
+  for (const r of rows) {
+    const name = exact.get(r.name.toUpperCase()) || r.name;
+    if (!exact.has(name.toUpperCase())) { state.names[c].push(name); exact.set(name.toUpperCase(), name); added++; }
+    if (seen.has(name)) dup++; seen.add(name);
+    const M = state.mine[c][name] || (state.mine[c][name] = {});
+    for (const lid in M) if (lid !== legId) for (const t of pickTeams(M[lid])) if (r.picks.includes(t)) reused.push(name + " " + t + " (" + lid + ")");
+    M[legId] = width > 1 ? r.picks.slice(0, width) : r.picks[0];
+    if (r.picks.length < width) partial++;
+    const sh = r.share != null ? r.share : def;
+    if (sh != null) { if (sh > 0 && sh < 1) state.share[c][name] = sh; else delete state.share[c][name]; }
+  }
+  const i0 = legIndex(c, legId);
+  const noPick = (state.names[c] || []).filter(n => myEntryAliveUpTo(c, n, i0, null) &&
+    pickTeams((state.mine[c][n] || {})[legId]).length < width);
+  box.value = "";
+  touch();
+  let msg = `✓ ${rows.length} entries → ${legId}`;
+  if (added) msg += ` · ${added} new name${added > 1 ? "s" : ""} added to the roster`;
+  if (dup) msg += ` · ⚠ ${dup} name${dup > 1 ? "s" : ""} repeated (last line wins)`;
+  if (partial) msg += ` · ⚠ ${partial} with fewer than ${width} picks`;
+  if (reused.length) msg += ` · ⚠ team already used by that entry: ${reused.slice(0, 4).join(", ")}${reused.length > 4 ? "…" : ""}`;
+  if (bad.length) msg += ` · ⚠ skipped: ${bad.slice(0, 3).join(" | ")}${bad.length > 3 ? "…" : ""}`;
+  if (noPick.length) msg += ` · ⚠ ${noPick.length} alive entr${noPick.length > 1 ? "ies" : "y"} still without a full ${legId} pick (neutral): ${noPick.slice(0, 6).join(", ")}${noPick.length > 6 ? "…" : ""}`;
+  const st2 = $(`ourstat-${c}`);
+  if (st2) st2.textContent = msg;
+}
+
 function pickEditorHtml(c, b) {
   const names = state.names[c] || [];
   if (!names.length) return `<div class="hint">Add entry names in Setup first.</div>`;
@@ -2445,6 +2660,13 @@ function setupHtml(c) {
       <label>Entry fee <span class="s2">($)</span>
         <input class="cell feein" data-c="${c}" value="${Number(state.money.fees[c]) || ""}" placeholder="${C.fee}"></label>
     </div>
+    <label>Our picks — leg
+      <select class="ourlegsel" data-c="${c}">${legOpts}</select>
+      <span class="s2">(one entry per line: NAME, TEAM${curLeg && curLeg.picks > 1 ? ", TEAM" : ""} — add "@68%" for a part-owned entry; names not on the roster are added)</span>
+      <textarea class="ourbox" data-c="${c}" rows="6" placeholder="${curLeg && curLeg.picks > 1 ? "Half Entry, LAR, NYG @50%" : "Half Entry, LAR @50%"}"></textarea>
+      <div class="pairrow"><button class="btn ourbtn" data-c="${c}">Load our picks</button>
+        <span class="s2">default ownership <input class="cell oursharein" data-c="${c}" placeholder="100" style="width:60px">%</span>
+        <span class="impstat s" id="ourstat-${c}"></span></div></label>
     <label>Import field picks — leg
       <select class="implegsel" data-c="${c}">${legOpts}</select>
       <textarea class="impbox" data-c="${c}" rows="6" placeholder="Paste here: selections PDF text, entry,pick CSV, per-team totals (KC 4890 / Chiefs 34.4%), or a link to the file"></textarea>
@@ -2508,6 +2730,7 @@ function wireContestView(c) {
       (hits ? ` · matched ${hits} picks from the imported field` : "") + ` · ${new Date().toLocaleTimeString()}`;
   });
   cv.querySelectorAll("button.impbtn").forEach(b => b.onclick = () => runImport(b.dataset.c));
+  cv.querySelectorAll("button.ourbtn").forEach(b => b.onclick = () => loadOurPicks(b.dataset.c));
   cv.querySelectorAll("button.impattach").forEach(b => b.onclick = () =>
     cv.querySelector(`input.impfile[data-c="${b.dataset.c}"]`).click());
   cv.querySelectorAll("input.impfile").forEach(inp => inp.onchange = async () => {
