@@ -1756,7 +1756,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1794011312926";
+const BUILD_ID = "1794011512731";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -2672,13 +2672,27 @@ function loadOurPicks(c) {
   let def = parseFloat(String(defIn && defIn.value || "").replace(/[%\s]/g, ""));
   def = def > 0 ? (def > 1 ? def / 100 : def) : null;
   const exact = myNameSet(c);
-  let added = 0, partial = 0, dup = 0;
+  let added = 0, partial = 0, dup = 0, renamed = 0;
   const seen = new Set(), reused = [];
+  const isPlaceholder = n => /^NEW ENTRY \d+$/i.test(String(n).trim());
+  const i0 = legIndex(c, legId);
+  const spare = (state.names[c] || []).filter(n => isPlaceholder(n) && !Object.keys(state.mine[c][n] || {}).length &&
+    !rows.some(r => r.name.toUpperCase() === String(n).toUpperCase()));
   if (!state.share) state.share = {};
   if (!state.share[c]) state.share[c] = {};
   for (const r of rows) {
-    const name = exact.get(r.name.toUpperCase()) || r.name;
-    if (!exact.has(name.toUpperCase())) { state.names[c].push(name); exact.set(name.toUpperCase(), name); added++; }
+    let name = exact.get(r.name.toUpperCase()) || r.name;
+    if (!exact.has(name.toUpperCase())) {
+      const ph = spare.shift();
+      if (ph) {                                   // take over a placeholder: its roster slot and share
+        const ix = state.names[c].indexOf(ph);
+        state.names[c][ix] = name;
+        if (state.share[c][ph] != null) { state.share[c][name] = state.share[c][ph]; delete state.share[c][ph]; }
+        delete state.mine[c][ph];
+        exact.delete(ph.toUpperCase()); renamed++;
+      } else { state.names[c].push(name); added++; }
+      exact.set(name.toUpperCase(), name);
+    }
     if (seen.has(name)) dup++; seen.add(name);
     const M = state.mine[c][name] || (state.mine[c][name] = {});
     for (const lid in M) if (lid !== legId) for (const t of pickTeams(M[lid])) if (r.picks.includes(t)) reused.push(name + " " + t + " (" + lid + ")");
@@ -2687,12 +2701,12 @@ function loadOurPicks(c) {
     const sh = r.share != null ? r.share : def;
     if (sh != null) { if (sh > 0 && sh < 1) state.share[c][name] = sh; else delete state.share[c][name]; }
   }
-  const i0 = legIndex(c, legId);
   const noPick = (state.names[c] || []).filter(n => myEntryAliveUpTo(c, n, i0, null) &&
     pickTeams((state.mine[c][n] || {})[legId]).length < width);
   box.value = "";
   touch();
   let msg = `✓ ${rows.length} entries → ${legId}`;
+  if (renamed) msg += ` · ${renamed} placeholder${renamed > 1 ? "s" : ""} renamed to the new name${renamed > 1 ? "s" : ""}`;
   if (added) msg += ` · ${added} new name${added > 1 ? "s" : ""} added to the roster`;
   if (dup) msg += ` · ⚠ ${dup} name${dup > 1 ? "s" : ""} repeated (last line wins)`;
   if (partial) msg += ` · ⚠ ${partial} with fewer than ${width} picks`;
