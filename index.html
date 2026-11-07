@@ -1699,7 +1699,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1794009544448";
+const BUILD_ID = "1794009979866";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -2260,12 +2260,15 @@ function renderContestView(c, b) {
         const fTot = wt.fieldSurv == null ? 0 : wt.fieldSurv + wt.fieldElim + wt.fieldPend;
         const fPct = v => fTot > 0 ? (100 * v / fTot).toFixed(1) + "%" : "—";
         const line = (color, txt) => `<span class="s2" style="font-weight:600;color:${color}">${txt}</span>`;
+        const nAll = (state.names[c] || []).length, wAll = namesWeight(c);
+        const partOwned = Math.abs(b.M - b.Mn) > 0.005 || Math.abs(b.Min0 - b.Min0N) > 0.005 || Math.abs(wAll - nAll) > 0.005;
         return `<div class="stat"><span class="k">Ours alive</span>
-          <span class="v gold">${fmtHeads(b.Mn, b.M)}<span class="of">/${fmtHeads((state.names[c] || []).length, namesWeight(c))} started</span></span>
-          <span class="s2">${fmtHeads(b.Min0N, b.Min0)} entered the week${b.Min0 !== b.Min0N ? " · owned share in ( )" : ""}</span>
-          ${line("var(--money)", `${fmtHeads(wt.oursSurvN, wt.oursSurv)} survived · ${oPct(wt.oursSurv)}`)}
-          ${line("var(--gold)", `${fmtHeads(wt.oursPendN, wt.oursPend)} pending · ${oPct(wt.oursPend)}`)}
-          ${line("var(--bad)", `${fmtHeads(wt.oursElimN, wt.oursElim)} eliminated · ${oPct(wt.oursElim)}`)}</div>
+          <span class="v gold">${fmtN(b.Mn)}<span class="of">/${fmtN(nAll)} started</span></span>
+          <span class="s2">${fmtN(b.Min0N)} entered the week</span>
+          ${partOwned ? `<span class="s2" title="ownership-weighted: our share of each entry">owned ${fmtEnt(Math.round(b.M * 100) / 100)} alive · ${fmtEnt(Math.round(b.Min0 * 100) / 100)} entered · ${fmtEnt(Math.round(wAll * 100) / 100)} started</span>` : ""}
+          ${line("var(--money)", `${fmtN(wt.oursSurvN)} survived · ${oPct(wt.oursSurv)}`)}
+          ${line("var(--gold)", `${fmtN(wt.oursPendN)} pending · ${oPct(wt.oursPend)}`)}
+          ${line("var(--bad)", `${fmtN(wt.oursElimN)} eliminated · ${oPct(wt.oursElim)}`)}</div>
         <div class="stat"><span class="k">Field alive</span>
           <span class="v">${fmtN(b.F)}<span class="of">/${fmtN(startN(c))} started</span>${est}</span>
           <span class="s2">${fmtN(b.Fin0)} entered the week</span>
