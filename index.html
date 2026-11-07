@@ -1756,7 +1756,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1794011041048";
+const BUILD_ID = "1794011312926";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -2506,6 +2506,7 @@ function comboTableHtml(c, b) {
   for (const n of (state.names[c] || []).filter(n => myEntryAliveUpTo(c, n, i0, null))) {
     const ps = [];
     for (const leg of legs) ps.push(...pickTeams((state.mine[c][n] || {})[leg.id]));
+    if (!ps.length) continue;
     const k = keyOf(ps);
     const g = ours.get(k) || { names: [], w: 0 };
     g.names.push(n); g.w += shareOf(c, n);
@@ -2543,7 +2544,7 @@ function comboTableHtml(c, b) {
   const keys = new Set([...field.keys(), ...ours.keys()]);
   const rows = [];
   for (const k of keys) {
-    const picks = k.split("+").filter(t => t !== "?"), missing = k.endsWith("+?");
+    const picks = k.split("+").filter(t => t && t !== "?"), missing = k.endsWith("+?");
     let adv = 1, lost = false, pending = false;
     const cells = picks.map(t => {
       const leg = teamLeg[t], gm = leg ? gameOfTeam(leg, t) : null;
@@ -2556,10 +2557,10 @@ function comboTableHtml(c, b) {
       return `<span class="${cls}" style="white-space:nowrap">${logo(t)} <b>${t}</b> <span class="s2">${Math.round(p * 100)}%</span></span>`;
     });
     if (missing) { const pn = b.eNeut ? b.eNeut[0] : PLACEHOLDER_WIN; adv *= pn; pending = true;
-      cells.push(`<span class="s2" style="white-space:nowrap" title="second pick not listed">? ${Math.round(pn * 100)}%</span>`); }
+      cells.push(`<span class="s2" style="white-space:nowrap" title="pick not entered yet: survives at the field's own rate">neutral ${Math.round(pn * 100)}%</span>`); }
     const o = ours.get(k), f = field.get(k) || 0;
-    rows.push({ k, picks, cells: cells.join(" <span class='s2'>+</span> "), adv: lost ? 0 : adv, lost, pending,
-      f, fPct: fieldN > 0 ? 100 * f / fieldN : null, oN: o ? o.names.length : 0, oW: o ? o.w : 0, names: o ? o.names : [],
+    rows.push({ k, picks, missing, cells: cells.join(" <span class='s2'>+</span> "), adv: lost ? 0 : adv, lost, pending,
+      f, fPct: fieldN > 0 && !missing ? 100 * f / fieldN : null, oN: o ? o.names.length : 0, oW: o ? o.w : 0, names: o ? o.names : [],
       oPct: b.Min0 && o ? 100 * o.w / b.Min0 : 0,
       live: picks.some(t => teamLeg[t] && isLiveGame(gameOfTeam(teamLeg[t], t))) });
   }
@@ -2572,11 +2573,11 @@ function comboTableHtml(c, b) {
     const status = r.lost ? `<span class="stL">✗ out</span>` : !r.pending ? `<span class="stW">✓ through</span>` : `<span class="stP">pending</span>`;
     return `<tr class="${r.lost ? "lost" : r.live ? "livegame" : ""}${r.oN ? " mineRow" : ""}">
       <td style="white-space:nowrap">${r.cells}</td>
-      <td class="num">${haveField ? (exact ? fmtN(r.f) : fmtN(Math.round(r.f))) : "—"}</td>
+      <td class="num">${haveField && !r.missing ? (exact ? fmtN(r.f) : fmtN(Math.round(r.f))) : "—"}</td>
       <td class="num s mh">${r.fPct == null ? "—" : r.fPct.toFixed(1) + "%"}</td>
       <td class="num gold" title="${esc(r.names.join(", "))}">${r.oN ? fmtHeads(r.oN, r.oW) : ""}</td>
       <td class="num s mh">${r.oN ? r.oPct.toFixed(1) + "%" : ""}</td>
-      <td class="num ${lev.cls}">${r.oN ? lev.txt : ""}</td>
+      <td class="num ${r.missing ? "s2" : lev.cls}">${r.oN && !r.missing ? lev.txt : r.oN ? "—" : ""}</td>
       <td class="num" style="font-weight:600">${r.lost ? "0%" : (100 * r.adv).toFixed(1) + "%"}</td>
       <td class="num">${status}</td></tr>`;
   }).join("");
