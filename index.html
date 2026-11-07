@@ -1699,7 +1699,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1794009979866";
+const BUILD_ID = "1794010522455";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -2352,6 +2352,8 @@ function renderContestView(c, b) {
     } else {
       wireSort($("cHead"), boardSort, render);
       wireContestView(c);
+      const cm = $("comboMore");
+      if (cm) cm.onclick = () => { comboShowAll = !comboShowAll; render(); };
     }
   }
   if (subTab === "entries") renderEntList(c, b);   // entries list keeps its own change guard
@@ -2425,45 +2427,67 @@ function renderEntList(c, b) {
  * only if EVERY pick wins, so its advance rate is the product of the picks' win probabilities (a settled
  * pick is 1 or 0; a pick not entered yet survives at the field's neutral rate, eNeut). The live EV engine
  * prices the same combos jointly with the field (scenarioEV) — this table is the per-entry view of it. */
-/** Aggregated by pick set: "KC + NYG — 3 entries (2.04 owned), 61% × 41% = 25% advance". The field column
- *  counts field entries holding the exact same pair when the week's import is entry-level (a projection
- *  or per-team totals never carry pairs). */
+/** The contest's pick-PAIR distribution for a ×2 week, most-selected first, with our entries on each pair
+ *  (user, Nov 6 2026: "all combos for the contest, highest selections to lowest"). Field pairs are EXACT when
+ *  the week's import is entry-level (the pool holds every entry's two picks); a projection or per-team totals
+ *  only carry each team's share, so pairs are then ESTIMATED with the engine's own pair model (legPairs:
+ *  P(i,j) = a_i·a_j, fitted so each team's pairs sum back to its share, 0 for two sides of one game). */
+let comboShowAll = false;
+const COMBO_CAP = 40;
 function comboTableHtml(c, b) {
-  const i0 = legIndex(c, b.legs[0].id);
-  const names = (state.names[c] || []).filter(n => myEntryAliveUpTo(c, n, i0, null));
-  if (!names.length || !b.legs.some(l => l.picks > 1)) return "";
-  const groups = new Map();
-  for (const n of names) {
-    const picks = [];
-    let missing = 0;
-    for (const leg of b.legs) {
-      const ps = pickTeams((state.mine[c][n] || {})[leg.id]);
-      for (const t of ps) picks.push({ t, leg });
-      missing += Math.max(0, (leg.picks || 1) - ps.length);
-    }
-    const key = picks.map(p => p.t).sort().join("+") + (missing ? "+?" : "");
-    const g = groups.get(key) || { key, picks, missing, names: [], w: 0 };
+  const legs = b.legs;
+  if (!legs.some(l => l.picks > 1)) return "";
+  const i0 = legIndex(c, legs[0].id);
+  const need = legs.reduce((x, l) => x + (l.picks || 1), 0);
+  const keyOf = ps => ps.slice().sort().join("+") + (ps.length < need ? "+?" : "");
+  const teamLeg = {};
+  for (const leg of legs) for (const g of leg.games) { teamLeg[g.home] = leg; teamLeg[g.away] = leg; }
+  // ours, grouped by pick set
+  const ours = new Map();
+  for (const n of (state.names[c] || []).filter(n => myEntryAliveUpTo(c, n, i0, null))) {
+    const ps = [];
+    for (const leg of legs) ps.push(...pickTeams((state.mine[c][n] || {})[leg.id]));
+    const k = keyOf(ps);
+    const g = ours.get(k) || { names: [], w: 0 };
     g.names.push(n); g.w += shareOf(c, n);
-    groups.set(key, g);
+    ours.set(k, g);
   }
-  // field pairs from the entry pool (exact matches of the same pick set, this week's legs)
+  // the field's pairs
   const P = pool[c];
-  const havePool = P && P.names.length && b.legs.every(l => (P.legs[l.id] || []).some(x => x != null));
-  let fieldPairs = null;
-  if (havePool) {
-    fieldPairs = new Map();
+  const exact = !!(P && P.names.length && legs.every(l => (P.legs[l.id] || []).some(x => x != null)));
+  const field = new Map();
+  let fieldN = 0, haveField = false;
+  if (exact) {
     for (let i = 0; i < P.names.length; i++) {
       const ps = [];
-      for (const l of b.legs) ps.push(...pickTeams((P.legs[l.id] || [])[i]));
+      for (const l of legs) ps.push(...pickTeams((P.legs[l.id] || [])[i]));
       if (!ps.length) continue;
-      const k = ps.sort().join("+");
-      fieldPairs.set(k, (fieldPairs.get(k) || 0) + 1);
+      const k = keyOf(ps);
+      field.set(k, (field.get(k) || 0) + 1); fieldN++;
+    }
+    haveField = fieldN > 0;
+  } else if (legs.length === 1) {
+    const leg = legs[0], fd = state.field[c][leg.id];
+    if (fd && fd.alive > 0) {
+      const PP = legPairs(fd, leg);
+      const opp = {};
+      for (const g of leg.games) { opp[g.home] = g.away; opp[g.away] = g.home; }
+      const ts = Object.keys(PP.a).filter(t => PP.a[t] > 0 && NAMES[t]).sort();
+      for (let i = 0; i < ts.length; i++) for (let j = i + 1; j < ts.length; j++) {
+        if (opp[ts[i]] === ts[j]) continue;
+        const v = PP.a[ts[i]] * PP.a[ts[j]] * fd.alive;
+        if (v >= 0.5) field.set(ts[i] + "+" + ts[j], v);
+      }
+      fieldN = Number(fd.alive); haveField = true;
     }
   }
-  const rows = [...groups.values()].map(g => {
+  const keys = new Set([...field.keys(), ...ours.keys()]);
+  const rows = [];
+  for (const k of keys) {
+    const picks = k.split("+").filter(t => t !== "?"), missing = k.endsWith("+?");
     let adv = 1, lost = false, pending = false;
-    const cells = g.picks.map(({ t, leg }) => {
-      const gm = gameOfTeam(leg, t);
+    const cells = picks.map(t => {
+      const leg = teamLeg[t], gm = leg ? gameOfTeam(leg, t) : null;
       if (!gm) { lost = true; return `<span class="stL">${logo(t)} ${t} ?</span>`; }
       const w = winnerOf(gm, null);
       const p = w ? (w === t ? 1 : 0) : winP(t, gm);
@@ -2472,29 +2496,42 @@ function comboTableHtml(c, b) {
       const cls = w ? (w === t ? "stW" : "stL") : "";
       return `<span class="${cls}" style="white-space:nowrap">${logo(t)} <b>${t}</b> <span class="s2">${Math.round(p * 100)}%</span></span>`;
     });
-    for (let k = 0; k < g.missing; k++) {
-      const li = 0, pn = b.eNeut ? b.eNeut[li] : PLACEHOLDER_WIN;
-      adv *= pn; pending = true;
-      cells.push(`<span class="s2" style="white-space:nowrap" title="pick not entered: survives at the field's own rate">neutral ${Math.round(pn * 100)}%</span>`);
-    }
-    const status = lost ? `<span class="stL">✗ out</span>` : !pending ? `<span class="stW">✓ through</span>` : `<span class="stP">pending</span>`;
-    const fp = fieldPairs ? (fieldPairs.get(g.key) || 0) : null;
-    return { g, cells: cells.join(" <span class='s2'>+</span> "), adv: lost ? 0 : adv, lost, status, fp };
-  });
-  rows.sort((a, b2) => (a.lost - b2.lost) || (b2.g.w - a.g.w) || (b2.adv - a.adv));
-  const body = rows.map(r => `<tr class="${r.lost ? "lost" : r.g.picks.some(p => isLiveGame(gameOfTeam(p.leg, p.t))) ? "livegame" : ""}">
+    if (missing) { const pn = b.eNeut ? b.eNeut[0] : PLACEHOLDER_WIN; adv *= pn; pending = true;
+      cells.push(`<span class="s2" style="white-space:nowrap" title="second pick not listed">? ${Math.round(pn * 100)}%</span>`); }
+    const o = ours.get(k), f = field.get(k) || 0;
+    rows.push({ k, picks, cells: cells.join(" <span class='s2'>+</span> "), adv: lost ? 0 : adv, lost, pending,
+      f, fPct: fieldN > 0 ? 100 * f / fieldN : null, oN: o ? o.names.length : 0, oW: o ? o.w : 0, names: o ? o.names : [],
+      oPct: b.Min0 && o ? 100 * o.w / b.Min0 : 0,
+      live: picks.some(t => teamLeg[t] && isLiveGame(gameOfTeam(teamLeg[t], t))) });
+  }
+  rows.sort((x, y) => (y.f - x.f) || (y.oW - x.oW) || x.k.localeCompare(y.k));
+  const total = rows.length;
+  const shown = comboShowAll ? rows : rows.filter((r, i) => i < COMBO_CAP || r.oN > 0);
+  const hidden = total - shown.length;
+  const body = shown.map(r => {
+    const lev = levTxt(r.oPct, r.fPct);
+    const status = r.lost ? `<span class="stL">✗ out</span>` : !r.pending ? `<span class="stW">✓ through</span>` : `<span class="stP">pending</span>`;
+    return `<tr class="${r.lost ? "lost" : r.live ? "livegame" : ""}${r.oN ? " mineRow" : ""}">
       <td style="white-space:nowrap">${r.cells}</td>
-      <td class="num gold" title="${esc(r.g.names.join(", "))}">${fmtHeads(r.g.names.length, r.g.w)}</td>
-      <td class="num s mh">${b.Min0 ? (100 * r.g.w / b.Min0).toFixed(1) + "%" : ""}</td>
-      <td class="num">${r.fp == null ? "—" : fmtN(r.fp)}</td>
+      <td class="num">${haveField ? (exact ? fmtN(r.f) : fmtN(Math.round(r.f))) : "—"}</td>
+      <td class="num s mh">${r.fPct == null ? "—" : r.fPct.toFixed(1) + "%"}</td>
+      <td class="num gold" title="${esc(r.names.join(", "))}">${r.oN ? fmtHeads(r.oN, r.oW) : ""}</td>
+      <td class="num s mh">${r.oN ? r.oPct.toFixed(1) + "%" : ""}</td>
+      <td class="num ${lev.cls}">${r.oN ? lev.txt : ""}</td>
       <td class="num" style="font-weight:600">${r.lost ? "0%" : (100 * r.adv).toFixed(1) + "%"}</td>
-      <td class="num">${r.status}</td></tr>`).join("");
-  return `<div class="hint" style="margin-top:14px"><b>Our combos</b> — every pick in a combo must win for the entry to advance, so its advance rate is the
-      product of the win probabilities. Entries = how many of ours are on the pair (owned share in parentheses); hover for the entry names. Field = field entries on the
-      exact same pair${fieldPairs ? "" : " (needs an entry-level import — a projection has no pairs)"}.</div>
+      <td class="num">${status}</td></tr>`;
+  }).join("");
+  const srcNote = !haveField ? "No field data for this leg yet."
+    : exact ? `Exact: every pair from the ${fmtN(fieldN)}-entry selections import.`
+    : `<b>Estimated</b> from each team's share (the projection has no pairs — exact pairs appear once the entry-level selections are imported).`;
+  return `<div class="hint" style="margin-top:14px"><b>Combos</b> — every pick pair in the contest, most selected first. Both teams must win for an entry to advance, so
+      the advance rate is the product of the win probabilities. Field = entries on the pair · Ours = our entries on it (owned share in parentheses; hover for names). ${srcNote}</div>
     <div style="overflow-x:auto"><table class="games even"><thead><tr>
-      <th>Combo</th><th class="num">Entries</th><th class="num mh">Ours %</th><th class="num">Field</th><th class="num">Advance</th><th class="num">Status</th></tr></thead>
-      <tbody>${body}</tbody></table></div>`;
+      <th>Combo</th><th class="num">Field${haveField && !exact ? " <span class='s2'>est.</span>" : ""}</th><th class="num mh">Field %</th>
+      <th class="num">Ours</th><th class="num mh">Ours %</th><th class="num">Lev</th><th class="num">Advance</th><th class="num">Status</th></tr></thead>
+      <tbody>${body || `<tr><td colspan="8" class="empty">no combos yet — load the field and our picks</td></tr>`}</tbody></table></div>
+    ${hidden > 0 || comboShowAll ? `<div class="pairrow"><button class="btn" id="comboMore">${comboShowAll ? "Show top " + COMBO_CAP : "Show all " + fmtN(total) + " combos"}</button>
+      <span class="s2">${comboShowAll ? fmtN(total) + " combos" : fmtN(shown.length) + " of " + fmtN(total) + " combos shown (top " + COMBO_CAP + " plus ours)"}</span></div>` : ""}`;
 }
 function combosHtml(c, b) {
   const i0 = legIndex(c, b.legs[0].id);
