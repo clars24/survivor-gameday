@@ -730,12 +730,36 @@ function isHeadCount(fd) { return !!(fd && fd.alive > 0 && fd.src !== "percent")
  * roughly doubled the overlap (GB 17% dead, then DET 15% loses: ~9% of DET's holders were already
  * out, not 17%). Single-pick legs get a = 0, which is plain additive loss. */
 const _pairCache = new WeakMap();
-function legPairs(fd, leg) {
+/* EXACT pairs (Nov 6 2026): when the leg's import is entry-level (src "entries") the pool holds every entry's
+ * two picks, so P.pp["T|U"] is the real share of entries on that pair and the factorisation is not used.
+ * Measured on a stacked synthetic field (70 of 314 on KC+SEA) the fitted model was off by 10% on EV and
+ * flipped the sign of some per-game swings; with the real pairs the engine matches a Monte Carlo on the
+ * actual roster. A projection or per-team totals still use the fitted a_i·a_j model. */
+function legPairs(fd, leg, c) {
   if (!fd || !(fd.alive > 0)) return { s: {}, a: {} };
   const hit = _pairCache.get(fd);
   if (hit && hit.leg === leg) return hit.P;
   const s = {}, a = {};
   for (const t in fd.own) s[t] = (fd.own[t] || 0) / fd.alive;
+  let pp = null;
+  if (leg.picks > 1 && c && fd.src === "entries" && pool[c] && pool[c].legs[leg.id]) {
+    const col = pool[c].legs[leg.id], m = {};
+    let n = 0;
+    for (let i = 0; i < col.length; i++) {
+      const ps = pickTeams(col[i]);
+      if (ps.length < 2) continue;
+      const k = ps[0] < ps[1] ? ps[0] + "|" + ps[1] : ps[1] + "|" + ps[0];
+      m[k] = (m[k] || 0) + 1; n++;
+    }
+    if (n > 0) {
+      pp = new Float64Array(32 * 32);
+      for (const k in m) {
+        const [x, y] = k.split("|"), i = POOL_IDX[x], j = POOL_IDX[y];
+        if (i == null || j == null) continue;
+        pp[i * 32 + j] = pp[j * 32 + i] = m[k] / fd.alive;
+      }
+    }
+  }
   if (leg.picks > 1) {
     const opp = {};
     for (const g of leg.games) { opp[g.home] = g.away; opp[g.away] = g.home; }
@@ -753,26 +777,59 @@ function legPairs(fd, leg) {
       if (delta < 1e-10) break;
     }
   }
-  const P = { s, a };
+  const P = { s, a, ppm: pp };
   _pairCache.set(fd, { leg, P });
   return P;
+}
+/** Share of entries holding BOTH t and u: the imported pair when known, else the fitted a_t·a_u. */
+function pairOf(P, t, u) {
+  if (P.ppm) { const i = POOL_IDX[t], j = POOL_IDX[u]; return i == null || j == null ? 0 : P.ppm[i * 32 + j]; }
+  return (P.a[t] || 0) * (P.a[u] || 0);
+}
+/** Σ over already-killed teams u (weight w_u, a 32-slot array) of the pair share with t. */
+function overlapA(P, t, m) {
+  if (!m) return 0;
+  const i = POOL_IDX[t];
+  if (i == null) return 0;
+  let x = 0;
+  const row = i * 32;
+  for (let j = 0; j < 32; j++) if (m[j]) x += m[j] * P.ppm[row + j];
+  return x;
 }
 /** Kill the holders of `losers` (one team, or both on a TIE) in a leg state {D, A}; weight w in [0,1]
  *  applies an EXPECTED loss (w = chance that side loses) for games folded rather than enumerated. */
 function legKill(st, P, losers, w, pool) {
   const k = w == null ? 1 : w;
   let dD = 0, dA = 0, dL = 0, dX = 0;
-  const X = pool === false ? (st.oA || 0) : (st.pA || 0);
-  for (const t of losers) {
-    dD += (P.s[t] || 0) - (P.a[t] || 0) * st.A; dA += P.a[t] || 0;
-    dL += P.s[t] || 0; dX += (P.s[t] || 0) - (P.a[t] || 0) * X;
+  if (!P.ppm) {                    // fitted pairs: a_t × A, A = Σ w·a over the teams killed so far (scalar, fast)
+    const X = pool === false ? (st.oA || 0) : (st.pA || 0);
+    for (const t of losers) {
+      dD += (P.s[t] || 0) - (P.a[t] || 0) * st.A; dA += P.a[t] || 0;
+      dL += P.s[t] || 0; dX += (P.s[t] || 0) - (P.a[t] || 0) * X;
+    }
+    st.D += k * dD; st.A += k * dA;
+    if (pool === false) {          // the same kill restricted to OUT-of-pool games (today's / settled)
+      st.oD = (st.oD || 0) + k * dX; st.oA = X + k * dA;
+    } else {                       // ... and restricted to the neutral pool
+      st.L = (st.L || 0) + k * dL;
+      st.pD = (st.pD || 0) + k * dX; st.pA = X + k * dA;
+    }
+    return;
   }
-  st.D += k * dD; st.A += k * dA;
-  if (pool === false) {            // the same kill restricted to OUT-of-pool games (today's / settled)
-    st.oD = (st.oD || 0) + k * dX; st.oA = X + k * dA;
-  } else {                         // ... and restricted to the neutral pool
+  // exact pairs: the part of t's holders already dead is Σ_u w_u·P(t,u) over the killed teams u, kept as
+  // 32-slot weight arrays; copy-on-write so the scenario walk's shallow undo copies stay valid
+  const Xw = pool === false ? st.oLw : st.pLw;
+  for (const t of losers) {
+    const sh = P.s[t] || 0;
+    dD += sh - overlapA(P, t, st.Lw); dL += sh; dX += sh - overlapA(P, t, Xw);
+  }
+  const bump = m => { const o = m ? new Float64Array(m) : new Float64Array(32); for (const t of losers) { const i = POOL_IDX[t]; if (i != null) o[i] += k; } return o; };
+  st.D += k * dD; st.Lw = bump(st.Lw);
+  if (pool === false) {
+    st.oD = (st.oD || 0) + k * dX; st.oLw = bump(st.oLw);
+  } else {
     st.L = (st.L || 0) + k * dL;
-    st.pD = (st.pD || 0) + k * dX; st.pA = X + k * dA;
+    st.pD = (st.pD || 0) + k * dX; st.pLw = bump(st.pLw);
   }
 }
 function legLosers(g, w) { return w === "TIE" ? [g.away, g.home] : [w === g.home ? g.away : g.home]; }
@@ -850,7 +907,7 @@ function fieldAliveEntering(c, i) {
   for (; j < i; j++) {
     const leg = legs[j], fd = state.field[c][leg.id];
     if (!fd || !(fd.alive > 0)) { exact = false; continue; }
-    const P = legPairs(fd, leg), st = { D: 0, A: 0 };
+    const P = legPairs(fd, leg, c), st = { D: 0, A: 0 };
     let anyPending = false;
     for (const g of leg.games) {
       const w = winnerOf(g, null);
@@ -879,7 +936,7 @@ function fieldPrevEntering(c, i) {
   for (; j < i; j++) {
     const leg = legs[j], fd = state.field[c][leg.id];
     if (!fd || !(fd.alive > 0)) continue;
-    const P = legPairs(fd, leg), st = { D: 0, A: 0 };
+    const P = legPairs(fd, leg, c), st = { D: 0, A: 0 };
     for (const g of leg.games) {
       const w = winnerOf(g, null);
       if (w) legKill(st, P, legLosers(g, w));
@@ -924,7 +981,7 @@ function noPickInfo(c, b) {
 function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot, out) {
   const nL = legs.length;
   const base = legs.map(() => ({ D: 0, A: 0, L: 0, pD: 0, pA: 0, oD: 0, oA: 0 }));   // per-leg kill state (+ pool / out-of-pool copies)
-  const pairs = legs.map(leg => legPairs(state.field[c][leg.id], leg));
+  const pairs = legs.map(leg => legPairs(state.field[c][leg.id], leg, c));
   // neutral pool per leg: the field's pick mass on games still open for an unentered pick (+ the
   // import's unassigned picks, which die at the placeholder rate below)
   const poolMass = legs.map((leg, li) => {
@@ -1115,7 +1172,7 @@ function contestWeekEV(c, w, hyp, opts) {
     for (const leg of legs) {
       const fd = state.field[c][leg.id];
       if (!fd || !(fd.alive > 0)) continue;
-      const P = legPairs(fd, leg), st = { D: 0, A: 0 };
+      const P = legPairs(fd, leg, c), st = { D: 0, A: 0 };
       for (const g of leg.games) { const w = winnerOf(g, null); if (w) legKill(st, P, legLosers(g, w)); }
       fs *= legSurv(st);
     }
@@ -1165,7 +1222,7 @@ function contestWeekEV(c, w, hyp, opts) {
 
     const st = { D: 0, A: 0 }, est = { D: 0, A: 0 };   // settled / expected (see legKill)
     if (haveOwn) {
-      const P = legPairs(fd, leg);
+      const P = legPairs(fd, leg, c);
       for (const g of leg.games) {
         const wnr = winnerOf(g, hyp);
         if (wnr) { legKill(st, P, legLosers(g, wnr)); legKill(est, P, legLosers(g, wnr)); }
@@ -1699,7 +1756,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1794010522455";
+const BUILD_ID = "1794011041048";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -2105,14 +2162,16 @@ function weekTally(c, b) {
     if (!fd || !(fd.alive > 0)) { haveAll = false; break; }
     // share of entries whose EVERY pick has already won: single leg = Σ winners' shares; double leg =
     // pairs inside the winner set, Σ_{i<j} a_i·a_j = ((Σa)² − Σa²)/2 (winners never share a game)
-    const P = legPairs(fd, leg);
-    let w = 0, Aw = 0, A2 = 0;
+    const P = legPairs(fd, leg, c);
+    let w = 0; const winners = [];
     for (const g of leg.games) {
       const res = winnerOf(g, null);
       if (!res || res === "TIE") continue;
-      w += P.s[res] || 0; const x = P.a[res] || 0; Aw += x; A2 += x * x;
+      w += P.s[res] || 0; winners.push(res);
     }
-    frac *= leg.picks > 1 ? Math.max(0, (Aw * Aw - A2) / 2) : w;
+    let both = 0;
+    for (let i = 0; i < winners.length; i++) for (let j = i + 1; j < winners.length; j++) both += pairOf(P, winners[i], winners[j]);
+    frac *= leg.picks > 1 ? Math.max(0, both) : w;
   }
   const fieldElim = Math.max(0, Math.round(b.Fin0 - b.F));
   const fieldSurv = haveAll ? Math.round((b.FinX || b.Fin0) * frac) : null;   // FinX: live-count scaled
