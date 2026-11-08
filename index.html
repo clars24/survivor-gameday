@@ -842,17 +842,30 @@ function legSurv(st) { return Math.max(0, 1 - st.D); }
  * of our rooting numbers — only the picks we HAVE entered (e.g. a Thursday leg) move the needle. The 70%
  * placeholder is the fallback for a leg with no field loaded. */
 const PLACEHOLDER_WIN = 0.70;
-/** The neutral POOL is the field's pick mass on games still open for a pick we haven't entered: a game
- *  that is settled, in progress, or kicks off today (ET) is out of it — by then Chris has told us our
- *  picks there (user, Nov 5 2026: "our % matches field % for any team not playing today"). */
-function todayET() { return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }); }
-function gameOutOfPool(g) {
+/** The neutral POOL is the field's pick mass on games still open for a pick we haven't entered. A settled
+ *  game is out of it. A game that is in progress or kicks off today is out of it only once at least one of
+ *  OUR picks for the leg sits on a game of that same date — i.e. Chris has entered that day's picks (user,
+ *  Nov 5 2026: "our % matches field % for any team not playing today"; W9 Thursday: 2 entries on JAX, so the
+ *  Thursday game left the pool and the other entries were known not to be on it). Before the day's picks are
+ *  entered, the day's games stay in the pool: our unknown picks keep tracking the field there. (Nov 8 2026:
+ *  the old "kicks off today" rule made 20 pick-less entries immune to the whole Sunday slate before the combos
+ *  were pasted — Splash 1K showed $2.5M against a $988K pro-rata share.) */
+function ourPickDates(c, leg) {
+  const dates = new Set();
+  for (const n of (state.names[c] || [])) {
+    for (const t of pickTeams((state.mine[c][n] || {})[leg.id])) {
+      const g = gameOfTeam(leg, t), lv = g && live.games[gameKey(g)];
+      if (lv && lv.date) dates.add(lv.date);
+    }
+  }
+  return dates;
+}
+function gameOutOfPool(g, dates) {
   const k = gameKey(g);
   if (state.results[k]) return true;
   const lv = live.games[k];
-  if (!lv) return false;
-  if (lv.state && lv.state !== "pre") return true;
-  return !!lv.date && lv.date === todayET();
+  if (!lv || !lv.date) return false;
+  return !!dates && dates.has(lv.date);
 }
 /** Survival of an entry's neutral picks in one leg, given the leg's kill state st (legKill). Rule
  *  (user, Nov 5 2026): pool games must be a WASH — our unknown entries track the field's composition
@@ -982,6 +995,7 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot, out) {
   const nL = legs.length;
   const base = legs.map(() => ({ D: 0, A: 0, L: 0, pD: 0, pA: 0, oD: 0, oA: 0 }));   // per-leg kill state (+ pool / out-of-pool copies)
   const pairs = legs.map(leg => legPairs(state.field[c][leg.id], leg, c));
+  const pickDates = legs.map(leg => ourPickDates(c, leg));
   // neutral pool per leg: the field's pick mass on games still open for an unentered pick (+ the
   // import's unassigned picks, which die at the placeholder rate below)
   const poolMass = legs.map((leg, li) => {
@@ -989,14 +1003,14 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot, out) {
     if (!isHeadCount(fd)) return 0;
     let m = 0, assigned = 0;
     for (const t in fd.own) assigned += Number(fd.own[t]) || 0;
-    for (const g of leg.games) if (!gameOutOfPool(g)) m += (pairs[li].s[g.home] || 0) + (pairs[li].s[g.away] || 0);
+    for (const g of leg.games) if (!gameOutOfPool(g, pickDates[li])) m += (pairs[li].s[g.home] || 0) + (pairs[li].s[g.away] || 0);
     return m + Math.max(0, (leg.picks || 1) - assigned / Number(fd.alive));
   });
   const pend = new Map();                   // gameKey -> pending game info
   legs.forEach((leg, li) => {
     const fd = state.field[c][leg.id], haveOwn = !!(fd && fd.alive > 0), multi = leg.picks > 1;
     for (const g of leg.games) {
-      const inPool = !gameOutOfPool(g);
+      const inPool = !gameOutOfPool(g, pickDates[li]);
       // ownership reveals in waves as games lock: with an import in hand, a game that has
       // started (or appears in the import) is revealed — absent teams there really are 0.
       // A not-yet-started game missing from the import is simply hidden, not zero-owned.
@@ -1040,7 +1054,7 @@ function scenarioEV(c, legs, hyp, entries, Fin0, Min0, pot, out) {
       const P = pairs[li];
       let Xm = 0, LX = 0;
       for (const t of ps) {
-        const g = gameOfTeam(leg, t); if (!g || gameOutOfPool(g)) continue;   // only known picks inside the pool
+        const g = gameOfTeam(leg, t); if (!g || gameOutOfPool(g, pickDates[li])) continue;   // only known picks inside the pool
         const o = t === g.home ? g.away : g.home;
         Xm += (P.s[t] || 0) + (P.s[o] || 0); LX += P.s[o] || 0;
       }
@@ -1189,8 +1203,9 @@ function contestWeekEV(c, w, hyp, opts) {
     const fd = state.field[c][leg.id];
     if (!isHeadCount(fd)) return PLACEHOLDER_WIN;
     let L = placeholderDead(fd, leg), pool = L > 0 ? L / (1 - PLACEHOLDER_WIN) : 0;
+    const dates = ourPickDates(c, leg);
     for (const g of leg.games) {
-      if (gameOutOfPool(g)) continue;
+      if (gameOutOfPool(g, dates)) continue;
       const wnr = winnerOf(g, hyp);
       const sA = (fd.own[g.away] || 0) / fd.alive, sH = (fd.own[g.home] || 0) / fd.alive;
       pool += sA + sH;
@@ -1756,7 +1771,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1794011512731";
+const BUILD_ID = "1794146386388";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
