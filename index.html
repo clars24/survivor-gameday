@@ -99,6 +99,10 @@
   .tile .v { font-family: "Barlow Condensed", "Arial Narrow", sans-serif; font-weight: 700; font-size: 33px;
     line-height: 1.1; margin-top: 3px; font-variant-numeric: tabular-nums; }
   .tile .v.money { color: var(--money); }
+  /* Live EV: the big number with its two deltas BESIDE it (one row on desktop, a stacked column on phones) */
+  .evrow { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; }
+  .evdel { display: flex; flex-wrap: wrap; gap: 0 12px; font-size: 17px; }
+  .evd { white-space: nowrap; } .evd .s2 { font-size: 11px; }
   .tile .s { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
   .potgrid { display: grid; grid-template-columns: max-content max-content max-content;
     justify-content: start; gap: 2px 18px; font-size: 11.5px; margin-top: 4px;
@@ -229,6 +233,12 @@
     .tlogo { width: 15px; height: 15px; }
     .root5 { flex-wrap: nowrap; overflow-x: auto; }
     .tiles { grid-template-columns: 1fr; }
+    .tile { padding: 10px 13px 9px; }
+    .evrow { flex-wrap: nowrap; gap: 0 12px; }
+    .evnum { font-size: 29px; }
+    .evdel { flex-direction: column; gap: 0; font-size: 14px; line-height: 1.2; }
+    .evd .s2 { font-size: 10px; }
+    .tile .s { font-size: 10.5px; }
     .brand { font-size: 25px; }
     .cev .v { font-size: 27px; }
     .chead { gap: 16px; }
@@ -1771,7 +1781,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1794146386388";
+const BUILD_ID = "1794602770125";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
@@ -1951,12 +1961,12 @@ function renderTiles(R) {
   const dW = evExp - weekTot, dC = evExp - startTot, dB = evExp - buyin;
   setHtml($("tiles"), `
     <div class="tile"><div class="k">Live EV</div>
-      <div class="v" style="color:var(--gold)">${fmtMoney(evExp)}
-        <span style="font-size:17px;font-weight:700">
-          <span style="white-space:nowrap"><span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2" style="font-size:11px">vs Start of Week</span></span>
-          ${buyin > 0 ? `<span style="white-space:nowrap"><span style="color:${col(dB)}">${sw2(dB)}</span> <span class="s2" style="font-size:11px">vs Total Buy In</span></span>` : ""}</span></div>
-      <div class="s">started week ${fmtMoney(weekTot)} · started contest ${fmtMoney(startTot)}${buyin > 0 ? ` · total buy-in ${fmtMoney(buyin)}` : ""}</div>
-      ${inbuys > 0 ? `<div class="s">in-contest buys ${fmtMoney(inbuys)}${inbuysNote}</div>` : ""}</div>
+      <div class="v evrow" style="color:var(--gold)"><span class="evnum">${fmtMoney(evExp)}</span>
+        <span class="evdel">
+          <span class="evd"><span style="color:${col(dW)}">${sw2(dW)}</span> <span class="s2">vs Start of Week</span></span>
+          ${buyin > 0 ? `<span class="evd"><span style="color:${col(dB)}">${sw2(dB)}</span> <span class="s2">vs Total Buy In</span></span>` : ""}</span></div>
+      <div class="s"><span class="m-full">started week</span><span class="m-sm">week start</span> ${fmtMoney(weekTot)} · <span class="m-full">started contest</span><span class="m-sm">contest start</span> ${fmtMoney(startTot)}${buyin > 0 ? ` · <span class="m-full">total </span>buy-in ${fmtMoney(buyin)}` : ""}</div>
+      ${inbuys > 0 ? `<div class="s">in-contest buys ${fmtMoney(inbuys)}<span class="mh">${inbuysNote}</span></div>` : ""}</div>
     <div class="tile"><div class="k">Pots</div>
       <div class="potgrid">
         <span class="ph"></span><span class="ph">pot</span><span class="ph">per entry</span>
