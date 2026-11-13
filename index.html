@@ -234,9 +234,12 @@
     .root5 { flex-wrap: nowrap; overflow-x: auto; }
     .tiles { grid-template-columns: 1fr; }
     .tile { padding: 10px 13px 9px; }
-    .evrow { flex-wrap: nowrap; gap: 0 12px; }
-    .evnum { font-size: 29px; }
-    .evdel { flex-direction: column; gap: 0; font-size: 14px; line-height: 1.2; }
+    .evrow { flex-wrap: nowrap; align-items: center; gap: 0 12px; }
+    .evnum { font-size: 29px; line-height: 1; }
+    .evdel { display: grid; grid-template-columns: max-content max-content; column-gap: 5px; row-gap: 1px;
+      align-content: center; font-size: 14px; line-height: 1.15; }
+    .evd { display: contents; }                      /* amount | label become grid cells: both lines square up */
+    .evd > span:first-child { text-align: right; }
     .evd .s2 { font-size: 10px; }
     .tile .s { font-size: 10.5px; }
     .brand { font-size: 25px; }
@@ -1781,7 +1784,7 @@ async function poolRestore() {
 /* Self-update: every build stamps an id; a stale tab (phones especially hold old caches)
  * reloads itself when a newer build is live — shortly after boot, whenever the tab comes
  * back to the foreground, and every 10 min while hidden. Throttled to one check per 4 min. */
-const BUILD_ID = "1794602770125";
+const BUILD_ID = "1794602943233";
 let buildCheckAt = 0;
 async function checkBuild() {
   if (Date.now() - buildCheckAt < 240000) return;
